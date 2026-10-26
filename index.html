@@ -1,566 +1,184 @@
-# -*- coding: utf-8 -*-
-"""
-Бекенд Mini App для складу — Flask-версія (без FastAPI/a2wsgi).
-
-Чому Flask: на PythonAnywhere free-тарифі немає нативної підтримки ASGI
-(FastAPI), і міст a2wsgi іноді зависає без помилки в логах (502 по
-таймауту). Flask — звичайний WSGI-застосунок, працює там напряму, без
-жодних прошарків.
-
-Логіка повністю та сама, що й у FastAPI-версії: та сама база warehouse.db,
-ті самі ендпоінти, та сама перевірка підпису Telegram initData.
-
-Запуск локально:
-    pip install -r requirements.txt
-    python main.py          # або: flask --app main run --port 8000
-"""
-
-import functools
-import hashlib
-import hmac
-import io
-import json
-import os
-import sqlite3
-import time
-import qrcode
-from contextlib import contextmanager
-from urllib.parse import parse_qsl
-
-from fastapi.responses import HTMLResponse
-from dotenv import load_dotenv
-from flask import Flask, g, jsonify, request, send_file
-from flask_cors import CORS
-
-load_dotenv()
-
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
-DB_PATH = os.getenv("DB_PATH", "warehouse.db")
-FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "*")
-INIT_DATA_MAX_AGE = 3600  # секунд, протягом яких initData вважається свіжою
-
-if not BOT_TOKEN:
-    raise RuntimeError("Задай BOT_TOKEN у .env (той самий токен, що й у bot.py)")
-
-app = Flask(__name__)
-CORS(app, origins=[FRONTEND_ORIGIN] if FRONTEND_ORIGIN != "*" else "*")
-
-
-# ---------------------------------------------------------------------------
-# БАЗА ДАНИХ
-# ---------------------------------------------------------------------------
-@contextmanager
-def get_db():
-    # WAL тут свідомо НЕ вмикаємо: на PythonAnywhere файли лежать на мережевій
-    # файловій системі, де WAL може зависати при відкритті бази.
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=10)
-    conn.execute("PRAGMA foreign_keys=ON")
-    try:
-        yield conn
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def init_schema():
-    with get_db() as conn:
-        c = conn.cursor()
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                user_id INTEGER PRIMARY KEY,
-                username TEXT,
-                role TEXT,
-                status TEXT
-            )
-        """)
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS items (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT UNIQUE,
-                quantity INTEGER,
-                category TEXT
-            )
-        """)
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                item_id INTEGER,
-                action TEXT,
-                qty INTEGER,
-                user_id INTEGER,
-                date TEXT
-            )
-        """)
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS boxes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT
-            )
-        """)
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS box_items (
-                box_id INTEGER,
-                item_id INTEGER,
-                quantity INTEGER,
-                UNIQUE(box_id, item_id)
-            )
-        """)
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS categories (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT UNIQUE
-            )
-        """)
-        c.execute("CREATE INDEX IF NOT EXISTS idx_items_category ON items(category)")
-        c.execute("CREATE INDEX IF NOT EXISTS idx_logs_item_id ON logs(item_id)")
-        c.execute("CREATE INDEX IF NOT EXISTS idx_logs_user_id ON logs(user_id)")
-
-
-init_schema()
-
-
-# ---------------------------------------------------------------------------
-# ПОМИЛКИ — єдиний формат {"detail": "..."} як очікує фронтенд
-# ---------------------------------------------------------------------------
-class ApiError(Exception):
-    def __init__(self, status, detail):
-        super().__init__(detail)
-        self.status = status
-        self.detail = detail
-
-
-@app.errorhandler(ApiError)
-def handle_api_error(e):
-    return jsonify({"detail": e.detail}), e.status
-
-
-# ---------------------------------------------------------------------------
-# АВТОРИЗАЦІЯ ЧЕРЕЗ TELEGRAM initData
-# ---------------------------------------------------------------------------
-def _verify_init_data(init_data: str) -> dict:
-    try:
-        pairs = dict(parse_qsl(init_data, strict_parsing=True))
-    except ValueError:
-        raise ApiError(401, "Невалідний формат initData")
-
-    received_hash = pairs.pop("hash", None)
-    if not received_hash:
-        raise ApiError(401, "Відсутній hash в initData")
-
-    data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(pairs.items()))
-
-    secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
-    computed_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
-
-    if not hmac.compare_digest(computed_hash, received_hash):
-        raise ApiError(401, "Підпис initData не збігається — запит не від Telegram")
-
-    auth_date = int(pairs.get("auth_date", "0"))
-    if time.time() - auth_date > INIT_DATA_MAX_AGE:
-        raise ApiError(401, "initData застаріла, відкрий mini app наново")
-
-    user_raw = pairs.get("user")
-    if not user_raw:
-        raise ApiError(401, "В initData немає даних користувача")
-
-    return json.loads(user_raw)
-
-
-def _load_current_user() -> dict:
-    """Реєструє користувача (як add_user() у боті) і повертає його роль/статус."""
-    init_data = request.headers.get("X-Telegram-Init-Data", "")
-    tg_user = _verify_init_data(init_data)
-
-    uid = tg_user["id"]
-    username = tg_user.get("username") or tg_user.get("first_name") or str(uid)
-
-    with get_db() as conn:
-        c = conn.cursor()
-        c.execute("SELECT role, status FROM users WHERE user_id=?", (uid,))
-        row = c.fetchone()
-
-        if row is None:
-            if uid == ADMIN_ID:
-                c.execute(
-                    "INSERT INTO users (user_id, username, role, status) VALUES (?,?,?,?)",
-                    (uid, username, "admin", "approved"),
-                )
-                role, status = "admin", "approved"
-            else:
-                c.execute(
-                    "INSERT INTO users (user_id, username, role, status) VALUES (?,?,?,?)",
-                    (uid, username, "user", "pending"),
-                )
-                role, status = "user", "pending"
-        else:
-            role, status = row
-            if uid == ADMIN_ID and (role != "admin" or status != "approved"):
-                c.execute(
-                    "UPDATE users SET role='admin', status='approved' WHERE user_id=?",
-                    (uid,),
-                )
-                role, status = "admin", "approved"
-
-    return {"user_id": uid, "username": username, "role": role, "status": status}
-
-
-def require_approved(view):
-    """Декоратор: перевіряє initData і те, що акаунт підтверджений адміном.
-    Результат кладеться в g.user, звідки його бере сама view-функція."""
-    @functools.wraps(view)
-    def wrapped(*args, **kwargs):
-        user = _load_current_user()
-        if user["status"] != "approved":
-            raise ApiError(403, "Акаунт ще не підтверджено адміністратором")
-        g.user = user
-        return view(*args, **kwargs)
-    return wrapped
-
-
-def require_admin(view):
-    @functools.wraps(view)
-    def wrapped(*args, **kwargs):
-        user = _load_current_user()
-        if user["status"] != "approved":
-            raise ApiError(403, "Акаунт ще не підтверджено адміністратором")
-        if user["role"] != "admin":
-            raise ApiError(403, "Лише для адміністраторів")
-        g.user = user
-        return view(*args, **kwargs)
-    return wrapped
-
-
-# ---------------------------------------------------------------------------
-# /api/me  (без require_approved — саме тут реєструється новий користувач
-# і дізнається, що він ще pending)
-# ---------------------------------------------------------------------------
-@app.get("/api/me")
-def me():
-    return jsonify(_load_current_user())
-
-
-# ---------------------------------------------------------------------------
-# КАТЕГОРІЇ
-# ---------------------------------------------------------------------------
-@app.get("/api/categories")
-@require_approved
-def list_categories():
-    with get_db() as conn:
-        rows = conn.execute("SELECT name FROM categories ORDER BY id").fetchall()
-    return jsonify([r[0] for r in rows])
-
-
-@app.post("/api/categories")
-@require_admin
-def create_category():
-    name = (request.json or {}).get("name", "").strip()
-    if not name:
-        raise ApiError(400, "Порожня назва")
-    with get_db() as conn:
-        try:
-            conn.execute("INSERT INTO categories (name) VALUES (?)", (name,))
-        except sqlite3.IntegrityError:
-            raise ApiError(409, "Така категорія вже є")
-    return jsonify({"ok": True})
-
-
-@app.delete("/api/categories/<name>")
-@require_admin
-def delete_category(name):
-    with get_db() as conn:
-        count = conn.execute(
-            "SELECT COUNT(*) FROM items WHERE category=?", (name,)
-        ).fetchone()[0]
-        if count > 0:
-            raise ApiError(409, f"У категорії ще {count} товар(ів) — спочатку прибери їх")
-        conn.execute("DELETE FROM categories WHERE name=?", (name,))
-    return jsonify({"ok": True})
-
-
-# ---------------------------------------------------------------------------
-# ТОВАРИ
-# ---------------------------------------------------------------------------
-@app.get("/api/items")
-@require_approved
-def list_items():
-    category = request.args.get("category")
-    with get_db() as conn:
-        if category:
-            rows = conn.execute(
-                "SELECT id, name, quantity, category FROM items WHERE category=? ORDER BY name",
-                (category,),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT id, name, quantity, category FROM items ORDER BY name"
-            ).fetchall()
-    return jsonify([{"id": r[0], "name": r[1], "quantity": r[2], "category": r[3]} for r in rows])
-
-
-@app.get("/api/items/<int:item_id>")
-@require_approved
-def get_item(item_id):
-    with get_db() as conn:
-        row = conn.execute(
-            "SELECT id, name, quantity, category FROM items WHERE id=?", (item_id,)
-        ).fetchone()
-        if not row:
-            raise ApiError(404, "Товар не знайдено")
-        history = conn.execute(
-            """SELECT logs.action, logs.qty, logs.date, users.username
-               FROM logs LEFT JOIN users ON users.user_id = logs.user_id
-               WHERE logs.item_id=? ORDER BY logs.id DESC LIMIT 15""",
-            (item_id,),
-        ).fetchall()
-    return jsonify({
-        "id": row[0],
-        "name": row[1],
-        "quantity": row[2],
-        "category": row[3],
-        "history": [
-            {"action": h[0], "qty": h[1], "date": h[2], "username": h[3] or "?"}
-            for h in history
-        ],
-    })
-
-
-@app.post("/api/items")
-@require_admin
-def create_item():
-    body = request.json or {}
-    name = body.get("name", "").strip()
-    category = body.get("category", "")
-    quantity = int(body.get("quantity", 0) or 0)
-    if not name:
-        raise ApiError(400, "Порожня назва")
-    with get_db() as conn:
-        cat = conn.execute("SELECT 1 FROM categories WHERE name=?", (category,)).fetchone()
-        if not cat:
-            raise ApiError(400, "Такої категорії нема")
-        try:
-            conn.execute(
-                "INSERT INTO items (name, quantity, category) VALUES (?,?,?)",
-                (name, max(quantity, 0), category),
-            )
-        except sqlite3.IntegrityError:
-            raise ApiError(409, "Товар із такою назвою вже є")
-    return jsonify({"ok": True})
-
-
-@app.delete("/api/items/<int:item_id>")
-@require_admin
-def delete_item(item_id):
-    with get_db() as conn:
-        conn.execute("DELETE FROM items WHERE id=?", (item_id,))
-        conn.execute("DELETE FROM box_items WHERE item_id=?", (item_id,))
-    return jsonify({"ok": True})
-
-
-@app.post("/api/items/<int:item_id>/qty")
-@require_approved
-def change_qty(item_id):
-    delta = int((request.json or {}).get("delta", 0))
-    with get_db() as conn:
-        row = conn.execute("SELECT quantity FROM items WHERE id=?", (item_id,)).fetchone()
-        if not row:
-            raise ApiError(404, "Товар не знайдено")
-        new_qty = row[0] + delta
-        if new_qty < 0:
-            raise ApiError(409, "Залишок не може бути відʼємним")
-        conn.execute("UPDATE items SET quantity=? WHERE id=?", (new_qty, item_id))
-        conn.execute(
-            "INSERT INTO logs (item_id, action, qty, user_id, date) VALUES (?,?,?,?,datetime('now'))",
-            (item_id, "inc" if delta > 0 else "dec", abs(delta), g.user["user_id"]),
-        )
-    return jsonify({"quantity": new_qty})
-
-
-# ---------------------------------------------------------------------------
-# ПОШУК / ДЕФІЦИТ
-# ---------------------------------------------------------------------------
-@app.get("/api/search")
-@require_approved
-def search_items():
-    q = request.args.get("q", "")
-    if not q:
-        raise ApiError(400, "Порожній запит")
-    with get_db() as conn:
-        rows = conn.execute(
-            "SELECT id, name, quantity, category FROM items WHERE name LIKE ? ORDER BY name LIMIT 50",
-            (f"%{q}%",),
-        ).fetchall()
-    return jsonify([{"id": r[0], "name": r[1], "quantity": r[2], "category": r[3]} for r in rows])
-
-
-@app.get("/api/deficit")
-@require_approved
-def deficit_items():
-    threshold = int(request.args.get("threshold", 5))
-    with get_db() as conn:
-        rows = conn.execute(
-            "SELECT id, name, quantity, category FROM items WHERE quantity<=? ORDER BY quantity",
-            (threshold,),
-        ).fetchall()
-    return jsonify([{"id": r[0], "name": r[1], "quantity": r[2], "category": r[3]} for r in rows])
-
-
-# ---------------------------------------------------------------------------
-# BOXES
-# ---------------------------------------------------------------------------
-@app.get("/api/boxes")
-@require_approved
-def list_boxes():
-    with get_db() as conn:
-        rows = conn.execute("SELECT id, name FROM boxes ORDER BY id").fetchall()
-    return jsonify([{"id": r[0], "name": r[1]} for r in rows])
-
-
-@app.post("/api/boxes")
-@require_admin
-def create_box():
-    name = (request.json or {}).get("name", "").strip()
-    if not name:
-        raise ApiError(400, "Порожня назва")
-    with get_db() as conn:
-        conn.execute("INSERT INTO boxes (name) VALUES (?)", (name,))
-    return jsonify({"ok": True})
-
-
-@app.get("/api/boxes/<int:box_id>")
-@require_approved
-def get_box(box_id):
-    with get_db() as conn:
-        box = conn.execute("SELECT id, name FROM boxes WHERE id=?", (box_id,)).fetchone()
-        if not box:
-            raise ApiError(404, "Box не знайдено")
-        items = conn.execute(
-            """SELECT items.id, items.name, box_items.quantity
-               FROM box_items JOIN items ON items.id = box_items.item_id
-               WHERE box_items.box_id=? ORDER BY items.name""",
-            (box_id,),
-        ).fetchall()
-    return jsonify({
-        "id": box[0],
-        "name": box[1],
-        "items": [{"item_id": i[0], "name": i[1], "quantity": i[2]} for i in items],
-    })
-
-
-@app.delete("/api/boxes/<int:box_id>")
-@require_admin
-def delete_box(box_id):
-    with get_db() as conn:
-        conn.execute("DELETE FROM boxes WHERE id=?", (box_id,))
-        conn.execute("DELETE FROM box_items WHERE box_id=?", (box_id,))
-    return jsonify({"ok": True})
-
-
-@app.post("/api/boxes/<int:box_id>/items")
-@require_admin
-def add_item_to_box(box_id):
-    body = request.json or {}
-    item_id = int(body.get("item_id"))
-    quantity = int(body.get("quantity", 0))
-    with get_db() as conn:
-        item = conn.execute("SELECT 1 FROM items WHERE id=?", (item_id,)).fetchone()
-        if not item:
-            raise ApiError(404, "Товар не знайдено")
-        conn.execute(
-            """INSERT INTO box_items (box_id, item_id, quantity) VALUES (?,?,?)
-               ON CONFLICT(box_id, item_id) DO UPDATE SET quantity=excluded.quantity""",
-            (box_id, item_id, quantity),
-        )
-    return jsonify({"ok": True})
-
-
-@app.delete("/api/boxes/<int:box_id>/items/<int:item_id>")
-@require_admin
-def remove_item_from_box(box_id, item_id):
-    with get_db() as conn:
-        conn.execute("DELETE FROM box_items WHERE box_id=? AND item_id=?", (box_id, item_id))
-    return jsonify({"ok": True})
-
-
-# ---------------------------------------------------------------------------
-# QR-КОДИ
-# ---------------------------------------------------------------------------
-def _qr_png(payload: str):
-    img = qrcode.make(payload)
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    buf.seek(0)
-    return send_file(buf, mimetype="image/png")
-
-
-@app.get("/api/items/<int:item_id>/qr")
-@require_approved
-def item_qr(item_id):
-    return _qr_png(f"item_{item_id}")
-
-
-@app.get("/api/boxes/<int:box_id>/qr")
-@require_approved
-def box_qr(box_id):
-    return _qr_png(f"box_{box_id}")
-
-
-# ---------------------------------------------------------------------------
-# АДМІНКА
-# ---------------------------------------------------------------------------
-@app.get("/api/admin/pending")
-@require_admin
-def pending_users():
-    with get_db() as conn:
-        rows = conn.execute("SELECT user_id, username FROM users WHERE status='pending'").fetchall()
-    return jsonify([{"user_id": r[0], "username": r[1]} for r in rows])
-
-
-@app.post("/api/admin/approve/<int:target_id>")
-@require_admin
-def approve_user(target_id):
-    with get_db() as conn:
-        conn.execute("UPDATE users SET status='approved' WHERE user_id=?", (target_id,))
-    return jsonify({"ok": True})
-
-
-@app.post("/api/admin/reject/<int:target_id>")
-@require_admin
-def reject_user(target_id):
-    with get_db() as conn:
-        conn.execute("DELETE FROM users WHERE user_id=?", (target_id,))
-    return jsonify({"ok": True})
-
-
-@app.get("/api/admin/users")
-@require_admin
-def all_users():
-    with get_db() as conn:
-        rows = conn.execute(
-            "SELECT user_id, username, role, status FROM users ORDER BY username"
-        ).fetchall()
-    return jsonify([{"user_id": r[0], "username": r[1], "role": r[2], "status": r[3]} for r in rows])
-
-@app.get("/", response_class=HTMLResponse)
-async def read_root():
-    try:
-        with open("/home/Valetnyn/index.html", "r", encoding="utf-8") as f:
-            return f.read()
-    except FileNotFoundError:
-        return "Файл index.html не знайдено в директорії /home/Valetnyn/. Будь ласка, перевірте його розташування."
-
-
-@app.post("/api/admin/users/<int:target_id>/role")
-@require_admin
-def set_role(target_id):
-    role = (request.json or {}).get("role")
-    if role not in ("admin", "user"):
-        raise ApiError(400, "role має бути 'admin' або 'user'")
-    with get_db() as conn:
-        conn.execute("UPDATE users SET role=? WHERE user_id=?", (role, target_id))
-    return jsonify({"ok": True})
-
-
-if __name__ == "__main__":
-    # лише для локального запуску: python main.py
-    app.run(host="0.0.0.0", port=8000, debug=True)
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Склад</title>
+<script src="https://telegram.org"></script>
+<style>
+  :root {
+    --bg: var(--tg-theme-bg-color, #ffffff);
+    --text: var(--tg-theme-text-color, #111111);
+    --hint: var(--tg-theme-hint-color, #999999);
+    --link: var(--tg-theme-link-color, #2481cc);
+    --button: var(--tg-theme-button-color, #2481cc);
+    --button-text: var(--tg-theme-button-text-color, #ffffff);
+    --secondary-bg: var(--tg-theme-secondary-bg-color, #f0f0f0);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  #app { padding: 12px 14px 90px; max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 8px 0 14px; }
+  .card {
+    background: var(--secondary-bg);
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin-bottom: 8px;
+    display: flex; align-items: center; justify-content: space-between;
+    cursor: pointer;
+  }
+  .card .title { font-size: 15px; }
+  .card .sub { font-size: 12px; color: var(--hint); margin-top: 2px; }
+  .menu-btn {
+    display: block; width: 100%; text-align: left;
+    background: var(--secondary-bg); color: var(--text);
+    border: none; border-radius: 12px;
+    padding: 14px 16px; margin-bottom: 8px;
+    font-size: 15px; cursor: pointer;
+  }
+  .qty-badge {
+    font-weight: 600; font-size: 14px;
+    padding: 2px 10px; border-radius: 10px;
+    background: var(--bg);
+  }
+  .qty-low { color: #e0433a; }
+  .row { display: flex; align-items: center; gap: 10px; }
+  .btn {
+    background: var(--button); color: var(--button-text);
+    border: none; border-radius: 10px;
+    padding: 10px 16px; font-size: 15px; cursor: pointer;
+  }
+  .btn.secondary { background: var(--secondary-bg); color: var(--text); }
+  .btn.danger { background: #e0433a; color: #fff; }
+  .btn:disabled { opacity: .5; }
+  .round-btn {
+    width: 38px; height: 38px; border-radius: 50%;
+    border: none; background: var(--button); color: var(--button-text);
+    font-size: 20px; line-height: 1; cursor: pointer;
+  }
+  input[type=text], input[type=number] {
+    width: 100%; padding: 10px 12px; border-radius: 10px;
+    border: 1px solid var(--hint); background: var(--bg); color: var(--text);
+    font-size: 15px; margin-bottom: 10px;
+  }
+  .topbar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .topbar .back { cursor: pointer; font-size: 20px; color: var(--link); }
+  .hint { color: var(--hint); font-size: 13px; }
+  .history-item { font-size: 13px; color: var(--hint); border-top: 1px solid var(--secondary-bg); padding: 6px 0; }
+  .center { text-align: center; padding: 40px 0; color: var(--hint); }
+  .pill { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 8px; background: var(--secondary-bg); margin-left: 6px; }
+</style>
+</head>
+<body>
+<div id="app"><div class="center">Завантаження…</div></div>
+
+<script>
+const tg = window.Telegram.WebApp;
+tg.ready();
+tg.expand();
+
+const API_BASE = window.SKLAD_API_BASE || "https://pythonanywhere.com";
+const initData = tg.initData || "";
+
+async function api(path, { method = "GET", body } = {}) {
+  const res = await fetch(API_BASE + path, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      "X-Telegram-Init-Data": initData,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    let msg = res.statusText;
+    try { msg = (await res.json()).detail || msg; } catch (e) {}
+    throw new Error(msg);
+  }
+  const ct = res.headers.get("content-type") || "";
+  return ct.includes("application/json") ? res.json() : res;
+}
+
+let ME = null;
+const app = document.getElementById("app");
+
+function render(html) { app.innerHTML = html; }
+
+function topbar(title, backTo) {
+  return `<div class="topbar">
+    ${backTo ? `<span class="back" onclick="go('${backTo}')">←</span>` : ""}
+    <h1 style="margin:0">${title}</h1>
+  </div>`;
+}
+
+function toast(msg) {
+  if (tg.showAlert) tg.showAlert(msg); else alert(msg);
+}
+
+let lastRouteName = "menu";
+let lastRouteArgs = [];
+
+const routes = {};
+function route(name, fn) { routes[name] = fn; }
+
+async function go(name, ...args) {
+  try {
+    if (name !== "scan" && name !== "item") {
+      lastRouteName = name;
+      lastRouteArgs = args;
+    }
+    await routes[name](...args);
+  } catch (e) {
+    toast("Помилка: " + e.message);
+  }
+}
+
+async function changeQty(itemId, delta) {
+  try {
+    await api(`/api/items/${itemId}/qty`, { method: "POST", body: { delta } });
+    reRun();
+  } catch (e) {
+    toast(e.message);
+  }
+}
+function reRun() { go(lastRouteName, ...lastRouteArgs); }
+
+route("menu", async () => {
+  render(`
+    ${topbar("📦 Склад")}
+    <button class="menu-btn" onclick="go('categories')">📦 Товари</button>
+    <button class="menu-btn" onclick="go('search')">🔍 Пошук</button>
+    <button class="menu-btn" onclick="go('deficit')">📚 Залишки (дефіцит)</button>
+    <button class="menu-btn" onclick="go('boxes')">📦 Boxes</button>
+    <button class="menu-btn" onclick="go('scan')">📷 Сканувати QR</button>
+    ${ME && ME.role === "admin" ? `<button class="menu-btn" onclick="go('admin')">⚙️ Адмінка</button>` : ""}
+    ${ME && ME.status === "pending" ? `<p class="hint">Твій акаунт ще очікує підтвердження адміністратора.</p>` : ""}
+  `);
+});
+
+route("categories", async () => {
+  render(topbar("Категорії", "menu") + `<div class="center">Завантаження…</div>`);
+  const cats = await api("/api/categories");
+  render(
+    topbar("📦 Категорії", "menu") +
+    cats.map(c => `<div class="card" onclick="go('items','${encodeURIComponent(c)}')">
+        <span class="title">${c}</span><span>›</span>
+      </div>`).join("") +
+    (ME && ME.role === "admin" ? `
+      <div style="margin-top:14px">
+        <input type="text" id="newcat" placeholder="Нова категорія">
+        <button class="btn" onclick="createCategory()">+ Додати категорію</button>
+      </div>` : "")
+  );
+});
+
+// Автоматичний запуск меню при відкритті сторінки
+go("menu");
+</script>
+</body>
+</html>
