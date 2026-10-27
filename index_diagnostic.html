@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Діагностика</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  body {
+    margin: 0; padding: 12px 12px 60px;
+    background: #ffffff; color: #111111;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  h1 { font-size: 18px; margin: 4px 0 10px; }
+  #log {
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 13px; line-height: 1.45;
+    white-space: pre-wrap; word-break: break-word;
+    background: #f2f2f2; border-radius: 10px; padding: 10px;
+  }
+  .ok { color: #0a7a2f; }
+  .bad { color: #c0261c; font-weight: 600; }
+  button {
+    margin-top: 12px; padding: 10px 16px; font-size: 15px;
+    border: none; border-radius: 10px; background: #2481cc; color: #fff;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { background: #111; color: #eee; }
+    #log { background: #222; }
+    .ok { color: #5fd38a; }
+    .bad { color: #ff7b72; }
+  }
+</style>
+</head>
+<body>
+<h1>Діагностика mini app</h1>
+<div id="log"></div>
+<button onclick="location.reload()">Повторити тест</button>
+
+<script>
+const TEST_VERSION = "A";
+const API_BASE = "https://Valetnyn.pythonanywhere.com";
+
+const logEl = document.getElementById("log");
+function log(msg, cls) {
+  const line = document.createElement("div");
+  if (cls) line.className = cls;
+  line.textContent = msg;
+  logEl.appendChild(line);
+}
+
+// Будь-яка JS-помилка одразу з'являється на екрані
+window.addEventListener("error", (e) => {
+  log("JS ПОМИЛКА: " + e.message + " (рядок " + e.lineno + ")", "bad");
+});
+window.addEventListener("unhandledrejection", (e) => {
+  const r = e.reason;
+  log("PROMISE ПОМИЛКА: " + ((r && r.message) || r), "bad");
+});
+
+log("1. JS запустився. Версія тесту: " + TEST_VERSION, "ok");
+log("   Адреса сторінки: " + location.href);
+log("   API_BASE: " + API_BASE);
+
+const tg = window.Telegram && window.Telegram.WebApp;
+let initData = "";
+if (!tg) {
+  log("2. ПОМИЛКА: Telegram SDK не завантажився (window.Telegram відсутній)", "bad");
+} else {
+  tg.ready();
+  tg.expand();
+  initData = tg.initData || "";
+  log("2. Telegram SDK є. Версія " + tg.version + ", платформа " + tg.platform, "ok");
+  log("3. Довжина initData: " + initData.length + (initData.length ? "" : "  <-- ПОРОЖНЯ, відкрито не через Telegram?"),
+      initData.length ? "ok" : "bad");
+}
+
+// fetch з таймаутом, щоб запит ніколи не "висів" мовчки
+async function timedFetch(url, options, ms) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(url, Object.assign({}, options, { signal: controller.signal }));
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function step(title, path, headers) {
+  log(title);
+  const t0 = performance.now();
+  try {
+    const res = await timedFetch(API_BASE + path, { headers: headers || {} }, 20000);
+    const text = await res.text();
+    const ms = Math.round(performance.now() - t0);
+    log("   статус " + res.status + ", за " + ms + " мс");
+    log("   відповідь: " + text.slice(0, 300), res.ok ? "ok" : "");
+    return { res, text };
+  } catch (e) {
+    const ms = Math.round(performance.now() - t0);
+    if (e.name === "AbortError") {
+      log("   ПОМИЛКА: сервер не відповів за 20 секунд (таймаут)", "bad");
+    } else {
+      log("   ПОМИЛКА за " + ms + " мс: " + e.name + ": " + e.message, "bad");
+    }
+    return null;
+  }
+}
+
+(async function run() {
+  // Тест A: чи взагалі відповідає сервер (без авторизації).
+  // Очікується статус 401 і текст про initData — це ПРАВИЛЬНО.
+  const a = await step("4. Запит до сервера без авторизації: /api/me", "/api/me");
+  if (!a) {
+    log("ВИСНОВОК: до сервера не достукатись (мережа, 502 або CORS).", "bad");
+    return;
+  }
+
+  if (!initData) {
+    log("ВИСНОВОК: сервер відповідає, але initData порожня. Відкрий через кнопку меню бота.", "bad");
+    return;
+  }
+
+  // Тест B: з підписом Telegram.
+  // Очікується статус 200 і JSON з user_id, role, status.
+  const b = await step("5. Запит з авторизацією: /api/me", "/api/me", {
+    "X-Telegram-Init-Data": initData,
+  });
+  if (!b || !b.res.ok) {
+    log("ВИСНОВОК: авторизація не пройшла (дивись текст помилки вище).", "bad");
+    return;
+  }
+
+  // Тест C: чи читається база.
+  const c = await step("6. Список категорій: /api/categories", "/api/categories", {
+    "X-Telegram-Init-Data": initData,
+  });
+  if (c && c.res.ok) {
+    log("ВИСНОВОК: ВСЕ ПРАЦЮЄ. Можна повертати справжній index.html.", "ok");
+  }
+})();
+</script>
+</body>
+</html>
