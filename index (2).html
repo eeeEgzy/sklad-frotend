@@ -15,7 +15,7 @@
 'use strict';
 const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
 if (tg) { tg.ready(); tg.expand(); }
-const API_BASE = window.SKLAD_API_BASE || 'https://Valetnyn.pythonanywhere.com';
+const API_BASE = window.SKLAD_API_BASE || 'https://valetnyn.pythonanywhere.com';
 const initData = tg ? (tg.initData || '') : '';
 const app = document.getElementById('app');
 let ME = null;
