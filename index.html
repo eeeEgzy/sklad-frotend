@@ -123,7 +123,7 @@ function isAdmin() {
 }
 
 function canEdit() {
-  return Boolean(ME && (ME.role === "admin" || ME.role === "editor"));
+  return Boolean(ME && (ME.role === "admin" || ME.role === "editor" || ME.role === "user"));
 }
 
 function formField(labelText, id, type = "text", defaultVal = "") {
@@ -203,8 +203,8 @@ async function go(name, ...args) {
 // ================= МАРШРУТИ =================
 
 route("menu", async () => {
-  const roleName = ME?.role === "admin" ? "Адміністратор" : ME?.role === "editor" ? "Редактор" : "Працівник";
-  const roleBadgeColor = ME?.role === "admin" ? "#2481cc" : ME?.role === "editor" ? "#388a34" : "#e09f3a";
+  const roleName = ME?.role === "admin" ? "Адміністратор" : "Працівник";
+  const roleBadgeColor = ME?.role === "admin" ? "#2481cc" : "#e09f3a";
   render(`
     <div style="text-align:center; margin-bottom: 18px;">
       <h1 style="font-size: 24px; font-weight: 700; margin: 0 0 4px;">📦 Склад</h1>
@@ -434,7 +434,7 @@ function searchNow() {
       out.textContent = e.message;
     }
   }, 250);
-}
+});
 
 route("deficit", async () => {
   render(topbar("Дефіцит", "menu") + `<div class="center">Завантаження…</div>`);
@@ -680,8 +680,7 @@ route("admin", async () => {
           <div class="sub">ID: ${u.user_id} · ${u.status === "approved" ? "Підтверджений" : "Очікує"}</div>
         </div>
         <select style="width:130px;margin:0" onchange="setUserRole(${u.user_id}, this.value)" ${ME && u.user_id === ME.user_id ? "disabled" : ""}>
-          <option value="worker" ${u.role === "worker" ? "selected" : ""}>Працівник</option>
-          <option value="editor" ${u.role === "editor" ? "selected" : ""}>Редактор</option>
+          <option value="user" ${u.role !== "admin" ? "selected" : ""}>Працівник</option>
           <option value="admin" ${u.role === "admin" ? "selected" : ""}>Адмін</option>
         </select>
       </div>`).join("") +
