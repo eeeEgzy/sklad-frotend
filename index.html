@@ -25,13 +25,18 @@
   }
   #app { padding: 12px 14px 90px; max-width: 640px; margin: 0 auto; }
   h1 { font-size: 20px; margin: 8px 0 14px; }
+  h2 { font-size: 16px; margin: 16px 0 8px; }
   .card {
-    background: var(--secondary-bg); border-radius: 12px;
-    padding: 12px 14px; margin-bottom: 8px;
-    display: flex; align-items: center; justify-content: space-between; gap: 10px;
-    cursor: pointer;
+    background: var(--secondary-bg);
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin-bottom: 8px;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px;
   }
-  .card .title { font-size: 15px; }
+  .card.click { cursor: pointer; }
+  .card-main { flex: 1; }
+  .card .title { font-size: 15px; font-weight: 500; }
   .card .sub { font-size: 12px; color: var(--hint); margin-top: 2px; }
   .menu-btn {
     display: block; width: 100%; text-align: left;
@@ -40,48 +45,114 @@
     padding: 14px 16px; margin-bottom: 8px;
     font-size: 15px; cursor: pointer;
   }
-  .qty-badge { font-weight: 600; font-size: 14px; padding: 2px 10px; border-radius: 10px; background: var(--bg); }
-  .qty-low { color: #e0433a; }
-  .row { display: flex; align-items: center; gap: 10px; }
+  .qty, .qty-badge {
+    font-weight: 600; font-size: 14px;
+    padding: 4px 10px; border-radius: 10px;
+    background: var(--bg); white-space: nowrap;
+  }
+  .qty.low, .qty-low { color: #e0433a; }
+  .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .btn {
     background: var(--button); color: var(--button-text);
     border: none; border-radius: 10px;
-    padding: 10px 16px; font-size: 15px; cursor: pointer;
+    padding: 10px 14px; font-size: 14px; cursor: pointer;
   }
   .btn.secondary { background: var(--secondary-bg); color: var(--text); }
   .btn.danger { background: #e0433a; color: #fff; }
   .btn:disabled { opacity: .5; }
-  .round-btn {
-    width: 38px; height: 38px; border-radius: 50%;
-    border: none; background: var(--button); color: var(--button-text);
-    font-size: 20px; line-height: 1; cursor: pointer;
+  .form {
+    background: var(--secondary-bg);
+    padding: 12px 14px; border-radius: 12px; margin-top: 14px;
   }
-  input[type=text], input[type=number] {
+  .form h2 { margin-top: 0; }
+  label { display: block; font-size: 13px; color: var(--hint); margin-bottom: 4px; }
+  input, select {
     width: 100%; padding: 10px 12px; border-radius: 10px;
     border: 1px solid var(--hint); background: var(--bg); color: var(--text);
     font-size: 15px; margin-bottom: 10px;
   }
-  .topbar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-  .topbar .back { cursor: pointer; font-size: 22px; color: var(--link); padding: 0 6px; }
-  .hint { color: var(--hint); font-size: 13px; }
-  .history-item { font-size: 13px; color: var(--hint); border-top: 1px solid var(--secondary-bg); padding: 6px 0; }
+  .topbar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .topbar .back { cursor: pointer; font-size: 22px; color: var(--link); padding: 2px 6px; }
+  .hint { color: var(--hint); font-size: 13px; margin: 6px 0 12px; }
+  .history, .history-item {
+    font-size: 13px; color: var(--text);
+    background: var(--secondary-bg); border-radius: 10px;
+    padding: 10px 12px; margin-bottom: 8px; line-height: 1.4;
+  }
   .center { text-align: center; padding: 40px 0; color: var(--hint); }
-  .pill { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 8px; background: var(--secondary-bg); margin-left: 6px; }
+  .empty { text-align: center; padding: 24px 0; color: var(--hint); font-size: 14px; }
+  .video { width: 100%; max-height: 260px; background: #000; border-radius: 12px; margin-bottom: 10px; object-fit: cover; }
+  .qr { display: block; max-width: 220px; margin: 12px auto 4px; border-radius: 10px; }
 </style>
 </head>
 <body>
 <div id="app"><div class="center">Завантаження…</div></div>
 
 <script>
-// Якщо відкрито не в Telegram — не падаємо, а працюємо із заглушкою
-const tg = (window.Telegram && window.Telegram.WebApp) || {
-  initData: "", ready() {}, expand() {},
-};
-tg.ready();
-tg.expand();
+const tg = window.Telegram ? window.Telegram.WebApp : null;
+if (tg) {
+  tg.ready();
+  tg.expand();
+}
 
-const API_BASE = (window.SKLAD_API_BASE || "https://Valetnyn.pythonanywhere.com").replace(/\/$/, "");
-const initData = tg.initData || "";
+const API_BASE = window.SKLAD_API_BASE || "https://Valetnyn.pythonanywhere.com";
+const initData = (tg && tg.initData) ? tg.initData : "";
+
+let ME = null;
+const app = document.getElementById("app");
+
+function render(html) {
+  app.innerHTML = html;
+}
+
+function esc(str) {
+  return String(str ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function enc(str) {
+  return encodeURIComponent(String(str ?? ""));
+}
+
+function isAdmin() {
+  return Boolean(ME && ME.role === "admin");
+}
+
+function canEdit() {
+  return Boolean(ME && (ME.role === "admin" || ME.role === "editor"));
+}
+
+function formField(labelText, id, type = "text", defaultVal = "") {
+  return `<label for="${esc(id)}">${esc(labelText)}</label><input type="${esc(type)}" id="${esc(id)}" value="${esc(defaultVal)}">`;
+}
+
+function itemCard(i) {
+  return `<div class="card click" onclick="go('item', ${Number(i.id)})">
+    <div class="card-main">
+      <div class="title">${esc(i.name)}</div>
+      <div class="sub">${esc(i.category || "")}</div>
+    </div>
+    <span class="qty ${i.quantity <= 4 ? "low" : ""}">${i.quantity} шт.</span>
+  </div>`;
+}
+
+function topbar(title, backTo = "menu") {
+  return `<div class="topbar">
+    ${backTo ? `<span class="back" onclick="go('${esc(backTo)}')">←</span>` : ""}
+    <h1 style="margin:0">${esc(title)}</h1>
+  </div>`;
+}
+
+function toast(msg) {
+  if (tg && tg.showAlert) {
+    try { tg.showAlert(String(msg)); return; } catch (_e) {}
+  }
+  alert(String(msg));
+}
 
 async function api(path, { method = "GET", body } = {}) {
   const res = await fetch(API_BASE + path, {
@@ -90,270 +161,506 @@ async function api(path, { method = "GET", body } = {}) {
       "Content-Type": "application/json",
       "X-Telegram-Init-Data": initData,
     },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {
-    let msg = res.statusText || ("HTTP " + res.status);
+    let msg = res.statusText || `Помилка ${res.status}`;
     try {
-      const j = await res.json();
-      msg = j.detail || j.error || j.message || msg;
-    } catch (e) {}
+      const errJson = await res.json();
+      msg = errJson.detail || errJson.error || errJson.message || msg;
+    } catch (_e) {}
     throw new Error(msg);
   }
   const ct = res.headers.get("content-type") || "";
   return ct.includes("application/json") ? res.json() : res;
 }
 
-// Екранування, щоб назви з бази не ламали HTML
-function esc(s) {
-  return String(s ?? "").replace(/[&<>"']/g, ch => (
-    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]
-  ));
-}
-const qtyOf = it => Number(it.qty ?? it.quantity ?? 0);
-
-let ME = null;
-const app = document.getElementById("app");
-function render(html) { app.innerHTML = html; }
-
-function toast(msg) {
-  if (tg.showAlert) { try { tg.showAlert(msg); return; } catch (e) {} }
-  alert(msg);
-}
-
-function topbar(title, showBack) {
-  return `<div class="topbar">
-    ${showBack ? `<span class="back" onclick="back()">←</span>` : ""}
-    <h1 style="margin:0">${title}</h1>
-  </div>`;
-}
-
-/* ---------- Навігація ---------- */
+let lastRouteName = "menu";
+let lastRouteArgs = [];
 const routes = {};
-function route(name, fn) { routes[name] = fn; }
 
-const stack = [];
-let cur = null;
+function route(name, fn) {
+  routes[name] = fn;
+}
 
-async function run(name, args, push) {
+async function go(name, ...args) {
   try {
-    if (!routes[name]) throw new Error("Невідомий екран: " + name);
-    if (name === "scan") { await routes[name](...args); return; } // скан нічого не малює
-    if (name === "menu") stack.length = 0;
-    else if (push && cur) stack.push(cur);
-    cur = { name, args };
+    stopScanner();
+    if (name === "previous") {
+      return await routes[lastRouteName](...lastRouteArgs);
+    }
+    if (name !== "scan" && name !== "item") {
+      lastRouteName = name;
+      lastRouteArgs = args;
+    }
+    if (!routes[name]) throw new Error(`Маршрут "${name}" не знайдено`);
     await routes[name](...args);
   } catch (e) {
     toast("Помилка: " + e.message);
   }
 }
-function go(name, ...args) { return run(name, args, true); }
-function back() {
-  const p = stack.pop();
-  run(p ? p.name : "menu", p ? p.args : [], false);
-}
-function reRun() { if (cur) run(cur.name, cur.args, false); }
 
-/* ---------- Дії ---------- */
-async function changeQty(itemId, delta) {
+// ================= МАРШРУТИ =================
+
+route("menu", async () => {
+  const roleName = ME?.role === "admin" ? "Адміністратор" : ME?.role === "editor" ? "Редактор" : "Працівник";
+  render(`
+    ${topbar("📦 Склад", null)}
+    ${ME ? `<div class="hint">${esc(ME.username)} · ${roleName}</div>` : ""}
+    <button class="menu-btn" onclick="go('categories')">📦 Товари та категорії</button>
+    <button class="menu-btn" onclick="go('search')">🔍 Пошук товару</button>
+    <button class="menu-btn" onclick="go('deficit')">⚠️ Дефіцит і малі залишки</button>
+    <button class="menu-btn" onclick="go('boxes')">🧰 Бокси</button>
+    <button class="menu-btn" onclick="go('scan')">📷 Сканувати QR боксу</button>
+    ${isAdmin() ? `<button class="menu-btn" onclick="go('admin')">⚙️ Адмінка</button>` : ""}
+    ${ME && ME.status === "pending" ? `<p class="hint">Ваш акаунт очікує підтвердження адміністратора.</p>` : ""}
+  `);
+});
+
+route("categories", async () => {
+  render(topbar("Категорії", "menu") + `<div class="center">Завантаження…</div>`);
+  const cats = await api("/api/categories");
+  render(
+    topbar("📦 Категорії", "menu") +
+    (cats.length
+      ? cats.map(c => `<div class="card click" onclick="go('items', decodeURIComponent('${enc(c)}'))"><span class="title">${esc(c)}</span><span>›</span></div>`).join("")
+      : `<div class="empty">Категорій поки немає</div>`) +
+    (canEdit()
+      ? `<div class="form"><h2>Додати категорію</h2>${formField("Назва категорії", "newcat")}<button class="btn" onclick="createCategory()">＋ Створити категорію</button></div>`
+      : "")
+  );
+});
+
+async function createCategory() {
+  const input = document.getElementById("newcat");
+  const name = input ? input.value.trim() : "";
+  if (!name) return toast("Введи назву категорії");
   try {
-    await api(`/api/items/${itemId}/qty`, { method: "POST", body: { delta } });
-    reRun();
+    await api("/api/categories", { method: "POST", body: { name } });
+    toast("Категорію створено");
+    go("categories");
   } catch (e) {
     toast(e.message);
   }
 }
 
-async function createCategory() {
-  const el = document.getElementById("newcat");
-  const name = el ? el.value.trim() : "";
-  if (!name) return toast("Введи назву категорії");
-  try {
-    await api("/api/categories", { method: "POST", body: { name } });
-    reRun();
-  } catch (e) { toast(e.message); }
-}
-
-async function approveUser(id) {
-  try {
-    await api(`/api/admin/users/${id}/approve`, { method: "POST" });
-    reRun();
-  } catch (e) { toast(e.message); }
-}
-
-function itemCard(it) {
-  const q = qtyOf(it);
-  const low = it.min_qty !== undefined && it.min_qty !== null && q <= Number(it.min_qty);
-  return `<div class="card" onclick="go('item', ${Number(it.id)})">
-      <div>
-        <div class="title">${esc(it.name)}</div>
-        ${it.category ? `<div class="sub">${esc(it.category)}</div>` : ""}
-      </div>
-      <span class="qty-badge ${low || q <= 0 ? "qty-low" : ""}">${q}</span>
-    </div>`;
-}
-
-/* ---------- Екрани ---------- */
-route("menu", async () => {
-  render(`
-    ${topbar("📦 Склад", false)}
-    <button class="menu-btn" onclick="go('categories')">📦 Товари</button>
-    <button class="menu-btn" onclick="go('search')">🔍 Пошук</button>
-    <button class="menu-btn" onclick="go('deficit')">📚 Залишки (дефіцит)</button>
-    <button class="menu-btn" onclick="go('boxes')">📦 Boxes</button>
-    <button class="menu-btn" onclick="go('scan')">📷 Сканувати QR</button>
-    ${ME && ME.role === "admin" ? `<button class="menu-btn" onclick="go('admin')">⚙️ Адмінка</button>` : ""}
-    ${ME && ME.status === "pending" ? `<p class="hint">Твій акаунт ще очікує підтвердження адміністратора.</p>` : ""}
-  `);
-});
-
-route("categories", async () => {
-  render(topbar("Категорії", true) + `<div class="center">Завантаження…</div>`);
-  const cats = await api("/api/categories");
+route("items", async (category) => {
+  const catName = decodeURIComponent(category);
+  render(topbar(catName, "categories") + `<div class="center">Завантаження товарів…</div>`);
+  const items = await api("/api/items?category=" + enc(catName));
   render(
-    topbar("📦 Категорії", true) +
-    (cats.length ? "" : `<div class="center">Категорій ще немає</div>`) +
-    cats.map(c => {
-      const name = typeof c === "string" ? c : c.name;
-      return `<div class="card" onclick="go('items','${encodeURIComponent(name)}')">
-        <span class="title">${esc(name)}</span><span>›</span>
-      </div>`;
-    }).join("") +
-    (ME && ME.role === "admin" ? `
-      <div style="margin-top:14px">
-        <input type="text" id="newcat" placeholder="Нова категорія">
-        <button class="btn" onclick="createCategory()">+ Додати категорію</button>
-      </div>` : "")
+    topbar(catName, "categories") +
+    (items.length
+      ? items.map(i => itemCard(i)).join("")
+      : `<div class="empty">У цій категорії товарів поки немає</div>`) +
+    (canEdit()
+      ? `<div class="form"><h2>Додати товар</h2>${formField("Назва товару", "newitem")}${formField("Початкова кількість", "newqty", "number", "0")}<button class="btn" onclick="createItem(decodeURIComponent('${enc(catName)}'))">＋ Додати товар</button></div>`
+      : "")
   );
 });
 
-route("items", async (catEnc) => {
-  const cat = decodeURIComponent(catEnc);
-  render(topbar(esc(cat), true) + `<div class="center">Завантаження…</div>`);
-  const items = await api(`/api/items?category=${catEnc}`);
-  render(
-    topbar(esc(cat), true) +
-    (items.length ? items.map(itemCard).join("") : `<div class="center">Товарів немає</div>`)
-  );
-});
+async function createItem(category) {
+  const name = document.getElementById("newitem").value.trim();
+  const quantity = Number(document.getElementById("newqty").value || 0);
+  if (!name) return toast("Введи назву товару");
+  if (!Number.isInteger(quantity) || quantity < 0) return toast("Кількість має бути цілим невід’ємним числом");
+  try {
+    await api("/api/items", { method: "POST", body: { name, quantity, category } });
+    toast("Товар додано");
+    go("items", category);
+  } catch (e) {
+    toast(e.message);
+  }
+}
 
 route("item", async (id) => {
-  render(topbar("Товар", true) + `<div class="center">Завантаження…</div>`);
-  const it = await api(`/api/items/${id}`);
-  const q = qtyOf(it);
-  const hist = Array.isArray(it.history) ? it.history : [];
+  render(topbar("Товар", "previous") + `<div class="center">Завантаження…</div>`);
+  const item = await api("/api/items/" + id);
+  const history = item.history || [];
   render(
-    topbar(esc(it.name), true) +
-    `<div class="card" style="cursor:default">
-       <div>
-         <div class="sub">${esc(it.category || "")}</div>
-         <div class="title" style="margin-top:6px">Кількість: <b>${q}</b></div>
-       </div>
-       <div class="row">
-         <button class="round-btn" onclick="changeQty(${Number(it.id)}, -1)">−</button>
-         <button class="round-btn" onclick="changeQty(${Number(it.id)}, 1)">+</button>
-       </div>
-     </div>` +
-    (hist.length ? `<h3>Історія</h3>` + hist.map(h =>
-      `<div class="history-item">${esc(typeof h === "string" ? h : JSON.stringify(h))}</div>`).join("") : "")
+    topbar(item.name, "previous") +
+    `<div class="card">
+      <div class="card-main">
+        <div class="title">${esc(item.name)}</div>
+        <div class="sub">${esc(item.category)}</div>
+      </div>
+      <span class="qty ${item.quantity <= 4 ? "low" : ""}">${item.quantity} шт.</span>
+    </div>
+    <div class="row" style="margin-bottom:14px">
+      <button class="btn danger" onclick="changeItemQty(${item.id}, -1)">− Списати</button>
+      ${canEdit() ? `<button class="btn" onclick="changeItemQty(${item.id}, 1)">＋ Поповнити</button>` : ""}
+    </div>
+    <h2>Історія операцій</h2>` +
+    (history.length
+      ? history.map(h => `<div class="history"><b>${h.action === "inc" ? "+" : "−"}${h.qty} шт.</b> · ${esc(h.username || "")} · ${esc(h.date || "")}<br>${esc(h.reason || "")}</div>`).join("")
+      : `<div class="empty">Історії поки немає</div>`)
   );
 });
+
+async function changeItemQty(itemId, sign) {
+  const raw = prompt(sign < 0 ? "Скільки списати зі складу?" : "Скільки додати на склад?", "1");
+  if (raw === null) return;
+  const amount = Number(raw);
+  if (!Number.isInteger(amount) || amount < 1) return toast("Вкажи ціле число більше нуля");
+  let reason = "";
+  if (sign < 0) {
+    reason = prompt("Причина списання (обов’язково):", "Використано у виробництві") || "";
+    if (!reason.trim()) return toast("Причина списання обов’язкова");
+  }
+  try {
+    await api(`/api/items/${itemId}/qty`, { method: "POST", body: { delta: sign * amount, reason } });
+    toast("Залишок оновлено");
+    go("item", itemId);
+  } catch (e) {
+    toast(e.message);
+  }
+}
 
 route("search", async () => {
   render(
-    topbar("🔍 Пошук", true) +
-    `<input type="text" id="q" placeholder="Назва товару" oninput="doSearch()" autofocus>
-     <div id="results"></div>`
+    topbar("Пошук", "menu") +
+    `<input type="text" id="q" placeholder="Назва або частина назви" oninput="searchNow()">
+     <div id="results" class="hint">Почни вводити назву товару</div>`
   );
 });
 
 let searchTimer = null;
-function doSearch() {
+function searchNow() {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(async () => {
-    const q = document.getElementById("q");
-    const box = document.getElementById("results");
-    if (!q || !box) return;
-    const text = q.value.trim();
-    if (!text) { box.innerHTML = ""; return; }
+    const q = document.getElementById("q")?.value.trim();
+    const out = document.getElementById("results");
+    if (!out) return;
+    if (!q) {
+      out.textContent = "Почни вводити назву товару";
+      return;
+    }
     try {
-      const items = await api(`/api/search?q=${encodeURIComponent(text)}`);
-      box.innerHTML = items.length ? items.map(itemCard).join("") : `<div class="center">Нічого не знайдено</div>`;
-    } catch (e) { toast(e.message); }
-  }, 300);
+      const rows = await api("/api/search?q=" + enc(q));
+      out.innerHTML = rows.length ? rows.map(i => itemCard(i)).join("") : `<div class="empty">Нічого не знайдено</div>`;
+    } catch (e) {
+      out.textContent = e.message;
+    }
+  }, 250);
 }
 
 route("deficit", async () => {
-  render(topbar("📚 Дефіцит", true) + `<div class="center">Завантаження…</div>`);
-  const items = await api("/api/deficit");
+  render(topbar("Дефіцит", "menu") + `<div class="center">Завантаження…</div>`);
+  const rows = await api("/api/deficit?threshold=4");
   render(
-    topbar("📚 Дефіцит", true) +
-    (items.length ? items.map(itemCard).join("") : `<div class="center">Дефіциту немає 🎉</div>`)
+    topbar("⚠️ Дефіцит", "menu") +
+    `<p class="hint">Показані товари із залишком 4 шт. або менше.</p>` +
+    (rows.length ? rows.map(i => itemCard(i)).join("") : `<div class="empty">Товарів із критично малим залишком немає</div>`)
   );
 });
 
 route("boxes", async () => {
-  render(topbar("📦 Boxes", true) + `<div class="center">Завантаження…</div>`);
+  render(topbar("Бокси", "menu") + `<div class="center">Завантаження…</div>`);
   const boxes = await api("/api/boxes");
   render(
-    topbar("📦 Boxes", true) +
-    (boxes.length ? boxes.map(b => `<div class="card" onclick="go('box', ${Number(b.id)})">
-        <span class="title">${esc(b.name)}</span><span>›</span>
-      </div>`).join("") : `<div class="center">Боксів немає</div>`)
+    topbar("🧰 Бокси", "menu") +
+    (boxes.length
+      ? boxes.map(b => `<div class="card click" onclick="go('box', ${b.id})"><div class="card-main"><div class="title">${esc(b.name)}</div><div class="sub">Товарів: ${b.item_count}</div></div><span>›</span></div>`).join("")
+      : `<div class="empty">Боксів поки немає</div>`) +
+    (canEdit()
+      ? `<div class="form"><h2>Створити бокс</h2>${formField("Назва боксу", "boxname")}<button class="btn" onclick="createBox()">＋ Створити</button></div>`
+      : "")
   );
 });
+
+async function createBox() {
+  const name = document.getElementById("boxname").value.trim();
+  if (!name) return toast("Введи назву боксу");
+  try {
+    await api("/api/boxes", { method: "POST", body: { name } });
+    go("boxes");
+  } catch (e) {
+    toast(e.message);
+  }
+}
 
 route("box", async (id) => {
-  render(topbar("Box", true) + `<div class="center">Завантаження…</div>`);
-  const b = await api(`/api/boxes/${id}`);
-  const items = b.items || [];
+  render(topbar("Бокс", "boxes") + `<div class="center">Завантаження…</div>`);
+  const box = await api("/api/boxes/" + id);
   render(
-    topbar(esc(b.name), true) +
-    (items.length ? items.map(itemCard).join("") : `<div class="center">Бокс порожній</div>`)
+    topbar("🧰 " + box.name, "boxes") +
+    `<div class="row"><button class="btn secondary" onclick="showBoxQR(${id})">Показати QR</button></div>
+     <div id="qrholder"></div>
+     <h2>Товари в боксі</h2>` +
+    (box.items.length
+      ? box.items.map(i => `
+        <div class="card">
+          <div class="card-main">
+            <div class="title">${esc(i.name)}</div>
+            <div class="sub">${esc(i.category)} · На складі загалом: ${i.total_quantity}</div>
+          </div>
+          <span class="qty">${i.quantity} шт.</span>
+        </div>
+        <div class="row" style="margin:-3px 0 12px">
+          <button class="btn danger" onclick="changeBoxQty(${id}, ${i.item_id}, -1)">− Списати</button>
+          ${canEdit() ? `
+            <button class="btn" onclick="changeBoxQty(${id}, ${i.item_id}, 1)">＋ Поповнити</button>
+            <button class="btn secondary" onclick="removeBoxItem(${id}, ${i.item_id})">Прибрати з боксу</button>
+          ` : ""}
+        </div>`).join("")
+      : `<div class="empty">У боксі поки немає товарів</div>`) +
+    (canEdit()
+      ? `<div class="form"><h2>Додати товар у бокс</h2><label>Товар</label><select id="boxitem"><option value="">Завантаження…</option></select>${formField("Кількість для розміщення", "boxqty", "number", "1")}<button class="btn" onclick="addBoxItem(${id})">＋ Додати в бокс</button></div>`
+      : "")
+  );
+  if (canEdit()) loadBoxItemOptions();
+});
+
+async function loadBoxItemOptions() {
+  try {
+    const items = await api("/api/items");
+    const select = document.getElementById("boxitem");
+    if (select) {
+      select.innerHTML = `<option value="">Оберіть товар</option>` +
+        items.map(i => `<option value="${i.id}">${esc(i.name)} · доступно ${i.quantity}</option>`).join("");
+    }
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+async function addBoxItem(boxId) {
+  const item_id = Number(document.getElementById("boxitem").value);
+  const quantity = Number(document.getElementById("boxqty").value);
+  if (!item_id || !Number.isInteger(quantity) || quantity < 1) return toast("Оберіть товар і вкажіть кількість");
+  try {
+    await api(`/api/boxes/${boxId}/items`, { method: "POST", body: { item_id, quantity } });
+    go("box", boxId);
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+async function removeBoxItem(boxId, itemId) {
+  if (!confirm("Прибрати цей товар із боксу? Загальний складський залишок не зміниться.")) return;
+  try {
+    await api(`/api/boxes/${boxId}/items/${itemId}`, { method: "DELETE" });
+    go("box", boxId);
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+async function changeBoxQty(boxId, itemId, sign) {
+  const raw = prompt(sign < 0 ? "Скільки списати з боксу?" : "Скільки додати в бокс?", "1");
+  if (raw === null) return;
+  const amount = Number(raw);
+  if (!Number.isInteger(amount) || amount < 1) return toast("Вкажи ціле число більше нуля");
+  let reason = "";
+  if (sign < 0) {
+    reason = prompt("Причина списання (обов’язково):", "Використано у виробництві") || "";
+    if (!reason.trim()) return toast("Причина списання обов’язкова");
+  }
+  try {
+    await api(`/api/boxes/${boxId}/items/${itemId}/qty`, { method: "POST", body: { delta: sign * amount, reason } });
+    toast("Залишок боксу оновлено");
+    go("box", boxId);
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+async function showBoxQR(id) {
+  try {
+    const response = await fetch(`${API_BASE}/api/boxes/${id}/qr`, {
+      headers: { "X-Telegram-Init-Data": initData }
+    });
+    if (!response.ok) throw new Error("Не вдалося отримати QR-код");
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const holder = document.getElementById("qrholder");
+    if (holder) {
+      holder.innerHTML = `<img class="qr" src="${url}" alt="QR боксу"><p class="hint center">QR-код боксу №${id}</p>`;
+    }
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+let cameraStream = null, scanLoop = false;
+route("scan", async () => {
+  render(
+    topbar("Сканер QR", "menu") +
+    `<p class="hint">Наведи камеру на QR-код боксу. Якщо камера недоступна, введи код вручну (наприклад: box_12).</p>
+     <video id="camera" class="video" autoplay playsinline></video>
+     <div class="row">
+       <button class="btn" onclick="startScanner()">Увімкнути камеру</button>
+       <button class="btn secondary" onclick="stopScanner()">Зупинити</button>
+     </div>
+     <div class="form">
+       <label>Код боксу</label>
+       <input type="text" id="manualqr" placeholder="box_12">
+       <button class="btn" onclick="openScannedCode()">Відкрити бокс</button>
+     </div>
+     <div id="scanstatus" class="hint"></div>`
   );
 });
 
-route("scan", async () => {
-  if (!tg.showScanQrPopup) return toast("Сканер QR доступний тільки в Telegram");
-  tg.showScanQrPopup({ text: "Наведи камеру на QR" }, async (text) => {
-    tg.closeScanQrPopup();
+async function startScanner() {
+  if (tg && typeof tg.showScanQrPopup === "function") {
     try {
-      const r = await api(`/api/qr?code=${encodeURIComponent(text)}`);
-      if (r.type === "box") go("box", r.id); else go("item", r.id);
-    } catch (e) { toast(e.message); }
-    return true;
-  });
-});
+      tg.showScanQrPopup({ text: "Наведіть камеру на QR-код боксу" }, (text) => {
+        const field = document.getElementById("manualqr");
+        if (field) field.value = text;
+        tg.closeScanQrPopup();
+        openScannedCode();
+        return true;
+      });
+      return;
+    } catch (_e) {}
+  }
+  try {
+    if (!("BarcodeDetector" in window)) {
+      throw new Error("Вбудований QR-сканер недоступний. Введи код вручну або відкрий Mini App у Telegram.");
+    }
+    stopScanner();
+    cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
+    const video = document.getElementById("camera");
+    video.srcObject = cameraStream;
+    const detector = new BarcodeDetector({ formats: ["qr_code"] });
+    scanLoop = true;
+    const tick = async () => {
+      if (!scanLoop || !video || video.readyState < 2) return requestAnimationFrame(tick);
+      try {
+        const codes = await detector.detect(video);
+        if (codes.length) {
+          document.getElementById("manualqr").value = codes[0].rawValue;
+          stopScanner();
+          openScannedCode();
+          return;
+        }
+      } catch (_e) {}
+      requestAnimationFrame(tick);
+    };
+    video.onloadedmetadata = () => video.play().then(tick);
+  } catch (e) {
+    toast(e.message || "Не вдалося запустити камеру");
+  }
+}
+
+function stopScanner() {
+  scanLoop = false;
+  if (cameraStream) {
+    cameraStream.getTracks().forEach(t => t.stop());
+    cameraStream = null;
+  }
+  const video = document.getElementById("camera");
+  if (video) video.srcObject = null;
+}
+
+function openScannedCode() {
+  const code = (document.getElementById("manualqr")?.value || "").trim();
+  const match = code.match(/^box_(\d+)$/i);
+  if (!match) return toast("Невірний QR-код. Очікується код виду box_12");
+  stopScanner();
+  go("box", Number(match[1]));
+}
 
 route("admin", async () => {
-  render(topbar("⚙️ Адмінка", true) + `<div class="center">Завантаження…</div>`);
-  const users = await api("/api/admin/users");
+  render(topbar("Адмінка", "menu") + `<div class="center">Завантаження…</div>`);
+  const [pending, users] = await Promise.all([api("/api/admin/pending"), api("/api/admin/users")]);
   render(
-    topbar("⚙️ Адмінка", true) +
-    (users.length ? users.map(u => `<div class="card" style="cursor:default">
-        <div>
-          <div class="title">${esc(u.name || u.username || u.id)}</div>
-          <div class="sub">${esc(u.status || "")} ${esc(u.role || "")}</div>
+    topbar("⚙️ Адмінка", "menu") +
+    `<h2>Очікують підтвердження</h2>` +
+    (pending.length
+      ? pending.map(u => `
+        <div class="card">
+          <div class="card-main">
+            <div class="title">${esc(u.username)}</div>
+            <div class="sub">ID: ${u.user_id}</div>
+          </div>
+          <div class="row">
+            <button class="btn" onclick="approveUser(${u.user_id})">✓</button>
+            <button class="btn danger" onclick="rejectUser(${u.user_id})">×</button>
+          </div>
+        </div>`).join("")
+      : `<div class="empty">Немає нових заявок</div>`) +
+    `<h2>Користувачі та ролі</h2>` +
+    users.map(u => `
+      <div class="card" style="align-items:flex-start">
+        <div class="card-main">
+          <div class="title">${esc(u.username)}</div>
+          <div class="sub">ID: ${u.user_id} · ${u.status === "approved" ? "Підтверджений" : "Очікує"}</div>
         </div>
-        ${u.status === "pending" ? `<button class="btn" onclick="approveUser(${Number(u.id)})">Підтвердити</button>` : ""}
-      </div>`).join("") : `<div class="center">Користувачів немає</div>`)
+        <select style="width:130px;margin:0" onchange="setUserRole(${u.user_id}, this.value)" ${ME && u.user_id === ME.user_id ? "disabled" : ""}>
+          <option value="worker" ${u.role === "worker" ? "selected" : ""}>Працівник</option>
+          <option value="editor" ${u.role === "editor" ? "selected" : ""}>Редактор</option>
+          <option value="admin" ${u.role === "admin" ? "selected" : ""}>Адмін</option>
+        </select>
+      </div>`).join("") +
+    `<div class="row" style="margin-top:14px"><button class="btn secondary" onclick="go('adminlogs')">Історія операцій</button></div>`
   );
 });
 
-/* ---------- Старт ---------- */
-(async function init() {
+async function approveUser(id) {
   try {
-    ME = await api("/api/me");
+    await api(`/api/admin/approve/${id}`, { method: "POST", body: {} });
+    go("admin");
   } catch (e) {
-    render(`<div class="center">
-      Не вдалося підключитися до сервера.<br><span class="hint">${esc(e.message)}</span>
-      ${initData ? "" : `<br><span class="hint">Відкрий застосунок через Telegram.</span>`}
-      <br><br><button class="btn" onclick="location.reload()">Спробувати ще</button>
-    </div>`);
-    return;
+    toast(e.message);
   }
-  go("menu");
-})();
+}
+
+async function rejectUser(id) {
+  if (!confirm("Видалити заявку цього користувача?")) return;
+  try {
+    await api(`/api/admin/reject/${id}`, { method: "POST", body: {} });
+    go("admin");
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+async function setUserRole(id, role) {
+  try {
+    await api(`/api/admin/users/${id}/role`, { method: "POST", body: { role } });
+    toast("Роль оновлено");
+  } catch (e) {
+    toast(e.message);
+    go("admin");
+  }
+}
+
+route("adminlogs", async () => {
+  render(topbar("Історія операцій", "admin") + `<div class="center">Завантаження…</div>`);
+  const rows = await api("/api/admin/logs?limit=200");
+  render(
+    topbar("Історія операцій", "admin") +
+    (rows.length
+      ? rows.map(r => `<div class="history"><b>${esc(r.item_name || "Видалений товар")} · ${r.action === "inc" ? "+" : "−"}${r.qty} шт.</b><br>${esc(r.username || "")} · ${esc(r.date || "")} ${r.box_name ? "· " + esc(r.box_name) : ""}<br>${esc(r.reason || "")}</div>`).join("")
+      : `<div class="empty">Операцій поки немає</div>`)
+  );
+});
+
+async function boot() {
+  try {
+    if (!tg || !initData) {
+      throw new Error("Відкрий Mini App через Telegram, щоб передати дані авторизації.");
+    }
+    ME = await api("/api/me");
+    if (ME.status === "pending") {
+      render(
+        topbar("Очікування підтвердження", null) +
+        `<div class="center">Ваш запит на доступ до складу надіслано адміністратору.<br><br>Після підтвердження закрийте та знову відкрийте застосунок.</div>`
+      );
+      return;
+    }
+    await go("menu");
+  } catch (e) {
+    render(
+      topbar("Не вдалося увійти", null) +
+      `<div class="center">${esc(e.message)}<br><br><button class="btn" onclick="boot()">Спробувати ще раз</button></div>`
+    );
+  }
+}
+
+window.addEventListener("beforeunload", stopScanner);
+boot();
 </script>
 </body>
 </html>
