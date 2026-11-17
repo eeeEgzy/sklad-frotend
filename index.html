@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Склад</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg: var(--tg-theme-bg-color, #ffffff);
+    --text: var(--tg-theme-text-color, #111111);
+    --hint: var(--tg-theme-hint-color, #999999);
+    --link: var(--tg-theme-link-color, #2481cc);
+    --button: var(--tg-theme-button-color, #2481cc);
+    --button-text: var(--tg-theme-button-text-color, #ffffff);
+    --secondary-bg: var(--tg-theme-secondary-bg-color, #f0f0f0);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  #app { padding: 12px 14px 90px; max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 8px 0 14px; }
+  .card {
+    background: var(--secondary-bg); border-radius: 12px;
+    padding: 12px 14px; margin-bottom: 8px;
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    cursor: pointer;
+  }
+  .card .title { font-size: 15px; }
+  .card .sub { font-size: 12px; color: var(--hint); margin-top: 2px; }
+  .menu-btn {
+    display: block; width: 100%; text-align: left;
+    background: var(--secondary-bg); color: var(--text);
+    border: none; border-radius: 12px;
+    padding: 14px 16px; margin-bottom: 8px;
+    font-size: 15px; cursor: pointer;
+  }
+  .qty-badge { font-weight: 600; font-size: 14px; padding: 2px 10px; border-radius: 10px; background: var(--bg); }
+  .qty-low { color: #e0433a; }
+  .row { display: flex; align-items: center; gap: 10px; }
+  .btn {
+    background: var(--button); color: var(--button-text);
+    border: none; border-radius: 10px;
+    padding: 10px 16px; font-size: 15px; cursor: pointer;
+  }
+  .btn.secondary { background: var(--secondary-bg); color: var(--text); }
+  .btn.danger { background: #e0433a; color: #fff; }
+  .btn:disabled { opacity: .5; }
+  .round-btn {
+    width: 38px; height: 38px; border-radius: 50%;
+    border: none; background: var(--button); color: var(--button-text);
+    font-size: 20px; line-height: 1; cursor: pointer;
+  }
+  input[type=text], input[type=number] {
+    width: 100%; padding: 10px 12px; border-radius: 10px;
+    border: 1px solid var(--hint); background: var(--bg); color: var(--text);
+    font-size: 15px; margin-bottom: 10px;
+  }
+  .topbar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .topbar .back { cursor: pointer; font-size: 22px; color: var(--link); padding: 0 6px; }
+  .hint { color: var(--hint); font-size: 13px; }
+  .history-item { font-size: 13px; color: var(--hint); border-top: 1px solid var(--secondary-bg); padding: 6px 0; }
+  .center { text-align: center; padding: 40px 0; color: var(--hint); }
+  .pill { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 8px; background: var(--secondary-bg); margin-left: 6px; }
+</style>
+</head>
+<body>
+<div id="app"><div class="center">Завантаження…</div></div>
+
+<script>
+// Якщо відкрито не в Telegram — не падаємо, а працюємо із заглушкою
+const tg = (window.Telegram && window.Telegram.WebApp) || {
+  initData: "", ready() {}, expand() {},
+};
+tg.ready();
+tg.expand();
+
+const API_BASE = (window.SKLAD_API_BASE || "https://Valetnyn.pythonanywhere.com").replace(/\/$/, "");
+const initData = tg.initData || "";
+
+async function api(path, { method = "GET", body } = {}) {
+  const res = await fetch(API_BASE + path, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      "X-Telegram-Init-Data": initData,
+    },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    let msg = res.statusText || ("HTTP " + res.status);
+    try {
+      const j = await res.json();
+      msg = j.detail || j.error || j.message || msg;
+    } catch (e) {}
+    throw new Error(msg);
+  }
+  const ct = res.headers.get("content-type") || "";
+  return ct.includes("application/json") ? res.json() : res;
+}
+
+// Екранування, щоб назви з бази не ламали HTML
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, ch => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]
+  ));
+}
+const qtyOf = it => Number(it.qty ?? it.quantity ?? 0);
+
+let ME = null;
+const app = document.getElementById("app");
+function render(html) { app.innerHTML = html; }
+
+function toast(msg) {
+  if (tg.showAlert) { try { tg.showAlert(msg); return; } catch (e) {} }
+  alert(msg);
+}
+
+function topbar(title, showBack) {
+  return `<div class="topbar">
+    ${showBack ? `<span class="back" onclick="back()">←</span>` : ""}
+    <h1 style="margin:0">${title}</h1>
+  </div>`;
+}
+
+/* ---------- Навігація ---------- */
+const routes = {};
+function route(name, fn) { routes[name] = fn; }
+
+const stack = [];
+let cur = null;
+
+async function run(name, args, push) {
+  try {
+    if (!routes[name]) throw new Error("Невідомий екран: " + name);
+    if (name === "scan") { await routes[name](...args); return; } // скан нічого не малює
+    if (name === "menu") stack.length = 0;
+    else if (push && cur) stack.push(cur);
+    cur = { name, args };
+    await routes[name](...args);
+  } catch (e) {
+    toast("Помилка: " + e.message);
+  }
+}
+function go(name, ...args) { return run(name, args, true); }
+function back() {
+  const p = stack.pop();
+  run(p ? p.name : "menu", p ? p.args : [], false);
+}
+function reRun() { if (cur) run(cur.name, cur.args, false); }
+
+/* ---------- Дії ---------- */
+async function changeQty(itemId, delta) {
+  try {
+    await api(`/api/items/${itemId}/qty`, { method: "POST", body: { delta } });
+    reRun();
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+async function createCategory() {
+  const el = document.getElementById("newcat");
+  const name = el ? el.value.trim() : "";
+  if (!name) return toast("Введи назву категорії");
+  try {
+    await api("/api/categories", { method: "POST", body: { name } });
+    reRun();
+  } catch (e) { toast(e.message); }
+}
+
+async function approveUser(id) {
+  try {
+    await api(`/api/admin/users/${id}/approve`, { method: "POST" });
+    reRun();
+  } catch (e) { toast(e.message); }
+}
+
+function itemCard(it) {
+  const q = qtyOf(it);
+  const low = it.min_qty !== undefined && it.min_qty !== null && q <= Number(it.min_qty);
+  return `<div class="card" onclick="go('item', ${Number(it.id)})">
+      <div>
+        <div class="title">${esc(it.name)}</div>
+        ${it.category ? `<div class="sub">${esc(it.category)}</div>` : ""}
+      </div>
+      <span class="qty-badge ${low || q <= 0 ? "qty-low" : ""}">${q}</span>
+    </div>`;
+}
+
+/* ---------- Екрани ---------- */
+route("menu", async () => {
+  render(`
+    ${topbar("📦 Склад", false)}
+    <button class="menu-btn" onclick="go('categories')">📦 Товари</button>
+    <button class="menu-btn" onclick="go('search')">🔍 Пошук</button>
+    <button class="menu-btn" onclick="go('deficit')">📚 Залишки (дефіцит)</button>
+    <button class="menu-btn" onclick="go('boxes')">📦 Boxes</button>
+    <button class="menu-btn" onclick="go('scan')">📷 Сканувати QR</button>
+    ${ME && ME.role === "admin" ? `<button class="menu-btn" onclick="go('admin')">⚙️ Адмінка</button>` : ""}
+    ${ME && ME.status === "pending" ? `<p class="hint">Твій акаунт ще очікує підтвердження адміністратора.</p>` : ""}
+  `);
+});
+
+route("categories", async () => {
+  render(topbar("Категорії", true) + `<div class="center">Завантаження…</div>`);
+  const cats = await api("/api/categories");
+  render(
+    topbar("📦 Категорії", true) +
+    (cats.length ? "" : `<div class="center">Категорій ще немає</div>`) +
+    cats.map(c => {
+      const name = typeof c === "string" ? c : c.name;
+      return `<div class="card" onclick="go('items','${encodeURIComponent(name)}')">
+        <span class="title">${esc(name)}</span><span>›</span>
+      </div>`;
+    }).join("") +
+    (ME && ME.role === "admin" ? `
+      <div style="margin-top:14px">
+        <input type="text" id="newcat" placeholder="Нова категорія">
+        <button class="btn" onclick="createCategory()">+ Додати категорію</button>
+      </div>` : "")
+  );
+});
+
+route("items", async (catEnc) => {
+  const cat = decodeURIComponent(catEnc);
+  render(topbar(esc(cat), true) + `<div class="center">Завантаження…</div>`);
+  const items = await api(`/api/items?category=${catEnc}`);
+  render(
+    topbar(esc(cat), true) +
+    (items.length ? items.map(itemCard).join("") : `<div class="center">Товарів немає</div>`)
+  );
+});
+
+route("item", async (id) => {
+  render(topbar("Товар", true) + `<div class="center">Завантаження…</div>`);
+  const it = await api(`/api/items/${id}`);
+  const q = qtyOf(it);
+  const hist = Array.isArray(it.history) ? it.history : [];
+  render(
+    topbar(esc(it.name), true) +
+    `<div class="card" style="cursor:default">
+       <div>
+         <div class="sub">${esc(it.category || "")}</div>
+         <div class="title" style="margin-top:6px">Кількість: <b>${q}</b></div>
+       </div>
+       <div class="row">
+         <button class="round-btn" onclick="changeQty(${Number(it.id)}, -1)">−</button>
+         <button class="round-btn" onclick="changeQty(${Number(it.id)}, 1)">+</button>
+       </div>
+     </div>` +
+    (hist.length ? `<h3>Історія</h3>` + hist.map(h =>
+      `<div class="history-item">${esc(typeof h === "string" ? h : JSON.stringify(h))}</div>`).join("") : "")
+  );
+});
+
+route("search", async () => {
+  render(
+    topbar("🔍 Пошук", true) +
+    `<input type="text" id="q" placeholder="Назва товару" oninput="doSearch()" autofocus>
+     <div id="results"></div>`
+  );
+});
+
+let searchTimer = null;
+function doSearch() {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(async () => {
+    const q = document.getElementById("q");
+    const box = document.getElementById("results");
+    if (!q || !box) return;
+    const text = q.value.trim();
+    if (!text) { box.innerHTML = ""; return; }
+    try {
+      const items = await api(`/api/search?q=${encodeURIComponent(text)}`);
+      box.innerHTML = items.length ? items.map(itemCard).join("") : `<div class="center">Нічого не знайдено</div>`;
+    } catch (e) { toast(e.message); }
+  }, 300);
+}
+
+route("deficit", async () => {
+  render(topbar("📚 Дефіцит", true) + `<div class="center">Завантаження…</div>`);
+  const items = await api("/api/deficit");
+  render(
+    topbar("📚 Дефіцит", true) +
+    (items.length ? items.map(itemCard).join("") : `<div class="center">Дефіциту немає 🎉</div>`)
+  );
+});
+
+route("boxes", async () => {
+  render(topbar("📦 Boxes", true) + `<div class="center">Завантаження…</div>`);
+  const boxes = await api("/api/boxes");
+  render(
+    topbar("📦 Boxes", true) +
+    (boxes.length ? boxes.map(b => `<div class="card" onclick="go('box', ${Number(b.id)})">
+        <span class="title">${esc(b.name)}</span><span>›</span>
+      </div>`).join("") : `<div class="center">Боксів немає</div>`)
+  );
+});
+
+route("box", async (id) => {
+  render(topbar("Box", true) + `<div class="center">Завантаження…</div>`);
+  const b = await api(`/api/boxes/${id}`);
+  const items = b.items || [];
+  render(
+    topbar(esc(b.name), true) +
+    (items.length ? items.map(itemCard).join("") : `<div class="center">Бокс порожній</div>`)
+  );
+});
+
+route("scan", async () => {
+  if (!tg.showScanQrPopup) return toast("Сканер QR доступний тільки в Telegram");
+  tg.showScanQrPopup({ text: "Наведи камеру на QR" }, async (text) => {
+    tg.closeScanQrPopup();
+    try {
+      const r = await api(`/api/qr?code=${encodeURIComponent(text)}`);
+      if (r.type === "box") go("box", r.id); else go("item", r.id);
+    } catch (e) { toast(e.message); }
+    return true;
+  });
+});
+
+route("admin", async () => {
+  render(topbar("⚙️ Адмінка", true) + `<div class="center">Завантаження…</div>`);
+  const users = await api("/api/admin/users");
+  render(
+    topbar("⚙️ Адмінка", true) +
+    (users.length ? users.map(u => `<div class="card" style="cursor:default">
+        <div>
+          <div class="title">${esc(u.name || u.username || u.id)}</div>
+          <div class="sub">${esc(u.status || "")} ${esc(u.role || "")}</div>
+        </div>
+        ${u.status === "pending" ? `<button class="btn" onclick="approveUser(${Number(u.id)})">Підтвердити</button>` : ""}
+      </div>`).join("") : `<div class="center">Користувачів немає</div>`)
+  );
+});
+
+/* ---------- Старт ---------- */
+(async function init() {
+  try {
+    ME = await api("/api/me");
+  } catch (e) {
+    render(`<div class="center">
+      Не вдалося підключитися до сервера.<br><span class="hint">${esc(e.message)}</span>
+      ${initData ? "" : `<br><span class="hint">Відкрий застосунок через Telegram.</span>`}
+      <br><br><button class="btn" onclick="location.reload()">Спробувати ще</button>
+    </div>`);
+    return;
+  }
+  go("menu");
+})();
+</script>
+</body>
+</html>
