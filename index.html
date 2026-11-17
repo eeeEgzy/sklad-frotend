@@ -680,8 +680,7 @@ route("admin", async () => {
           <div class="sub">ID: ${u.user_id} · ${u.status === "approved" ? "Підтверджений" : "Очікує"}</div>
         </div>
         <select style="width:130px;margin:0" onchange="setUserRole(${u.user_id}, this.value)" ${ME && u.user_id === ME.user_id ? "disabled" : ""}>
-          <option value="worker" ${u.role === "worker" ? "selected" : ""}>Працівник</option>
-          <option value="editor" ${u.role === "editor" ? "selected" : ""}>Редактор</option>
+          <option value="user" ${u.role !== "admin" ? "selected" : ""}>Працівник</option>
           <option value="admin" ${u.role === "admin" ? "selected" : ""}>Адмін</option>
         </select>
       </div>`).join("") +
