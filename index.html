@@ -204,16 +204,75 @@ async function go(name, ...args) {
 
 route("menu", async () => {
   const roleName = ME?.role === "admin" ? "Адміністратор" : ME?.role === "editor" ? "Редактор" : "Працівник";
+  const roleBadgeColor = ME?.role === "admin" ? "#2481cc" : ME?.role === "editor" ? "#388a34" : "#e09f3a";
   render(`
-    ${topbar("📦 Склад", null)}
-    ${ME ? `<div class="hint">${esc(ME.username)} · ${roleName}</div>` : ""}
-    <button class="menu-btn" onclick="go('categories')">📦 Товари та категорії</button>
-    <button class="menu-btn" onclick="go('search')">🔍 Пошук товару</button>
-    <button class="menu-btn" onclick="go('deficit')">⚠️ Дефіцит і малі залишки</button>
-    <button class="menu-btn" onclick="go('boxes')">🧰 Бокси</button>
-    <button class="menu-btn" onclick="go('scan')">📷 Сканувати QR боксу</button>
-    ${isAdmin() ? `<button class="menu-btn" onclick="go('admin')">⚙️ Адмінка</button>` : ""}
-    ${ME && ME.status === "pending" ? `<p class="hint">Ваш акаунт очікує підтвердження адміністратора.</p>` : ""}
+    <div style="text-align:center; margin-bottom: 18px;">
+      <h1 style="font-size: 24px; font-weight: 700; margin: 0 0 4px;">📦 Склад</h1>
+      <div style="font-size: 13px; color: var(--hint);">Система управління залишками та боксами</div>
+    </div>
+    
+    ${ME ? `
+      <div class="card" style="background: var(--secondary-bg); border-left: 4px solid ${roleBadgeColor}; margin-bottom: 16px;">
+        <div class="card-main">
+          <div style="font-weight: 600; font-size: 15px;">👤 ${esc(ME.username)}</div>
+          <div style="font-size: 13px; color: var(--hint); margin-top: 2px;">Посада: <span style="font-weight: 500; color: var(--text);">${roleName}</span></div>
+        </div>
+      </div>
+    ` : ""}
+
+    <div style="display: flex; flex-direction: column; gap: 10px;">
+      <div class="card click" onclick="go('categories')" style="padding: 16px;">
+        <div class="card-main">
+          <div class="title" style="font-size: 17px; font-weight: 600;">📦 Товари та категорії</div>
+          <div class="sub" style="font-size: 13px; margin-top: 4px;">Перегляд каталогу, додавання та управління</div>
+        </div>
+        <span style="font-size: 20px; color: var(--link);">›</span>
+      </div>
+
+      <div class="card click" onclick="go('search')" style="padding: 16px;">
+        <div class="card-main">
+          <div class="title" style="font-size: 17px; font-weight: 600;">🔍 Пошук товару</div>
+          <div class="sub" style="font-size: 13px; margin-top: 4px;">Швидкий пошук за назвою або частиною</div>
+        </div>
+        <span style="font-size: 20px; color: var(--link);">›</span>
+      </div>
+
+      <div class="card click" onclick="go('deficit')" style="padding: 16px;">
+        <div class="card-main">
+          <div class="title" style="font-size: 17px; font-weight: 600;">⚠️ Дефіцит і малі залишки</div>
+          <div class="sub" style="font-size: 13px; margin-top: 4px;">Товари із залишком 4 шт. або менше</div>
+        </div>
+        <span style="font-size: 20px; color: var(--link);">›</span>
+      </div>
+
+      <div class="card click" onclick="go('boxes')" style="padding: 16px;">
+        <div class="card-main">
+          <div class="title" style="font-size: 17px; font-weight: 600;">🧰 Бокси</div>
+          <div class="sub" style="font-size: 13px; margin-top: 4px;">Управління комірками та QR-кодами</div>
+        </div>
+        <span style="font-size: 20px; color: var(--link);">›</span>
+      </div>
+
+      <div class="card click" onclick="go('scan')" style="padding: 16px;">
+        <div class="card-main">
+          <div class="title" style="font-size: 17px; font-weight: 600;">📷 Сканувати QR боксу</div>
+          <div class="sub" style="font-size: 13px; margin-top: 4px;">Миттєвий доступ до боксу через камеру</div>
+        </div>
+        <span style="font-size: 20px; color: var(--link);">›</span>
+      </div>
+
+      ${isAdmin() ? `
+        <div class="card click" onclick="go('admin')" style="padding: 16px; border: 1px dashed var(--link);">
+          <div class="card-main">
+            <div class="title" style="font-size: 17px; font-weight: 600; color: var(--link);">⚙️ Панель адміністратора</div>
+            <div class="sub" style="font-size: 13px; margin-top: 4px;">Підтвердження користувачів, ролі та історія</div>
+          </div>
+          <span style="font-size: 20px; color: var(--link);">›</span>
+        </div>
+      ` : ""}
+    </div>
+
+    ${ME && ME.status === "pending" ? `<div class="card" style="margin-top: 16px; background: #fff3cd; color: #856404;"><div class="card-main"><div class="title">Очікування підтвердження</div><div class="sub" style="color: #856404;">Ваш акаунт очікує підтвердження адміністратора.</div></div></div>` : ""}
   `);
 });
 
@@ -223,7 +282,15 @@ route("categories", async () => {
   render(
     topbar("📦 Категорії", "menu") +
     (cats.length
-      ? cats.map(c => `<div class="card click" onclick="go('items', decodeURIComponent('${enc(c)}'))"><span class="title">${esc(c)}</span><span>›</span></div>`).join("")
+      ? cats.map(c => `
+        <div class="card">
+          <div class="card-main click" onclick="go('items', decodeURIComponent('${enc(c)}'))">
+            <div class="title" style="font-size: 16px;">📦 ${esc(c)}</div>
+            <div class="sub">Перейти до товарів</div>
+          </div>
+          ${canEdit() ? `<button class="btn danger" style="padding:6px 10px;font-size:12px;" onclick="deleteCategory(decodeURIComponent('${enc(c)}'))" title="Видалити категорію">🗑</button>` : ""}
+          <span style="color:var(--hint);cursor:pointer;margin-left:6px;" onclick="go('items', decodeURIComponent('${enc(c)}'))">›</span>
+        </div>`).join("")
       : `<div class="empty">Категорій поки немає</div>`) +
     (canEdit()
       ? `<div class="form"><h2>Додати категорію</h2>${formField("Назва категорії", "newcat")}<button class="btn" onclick="createCategory()">＋ Створити категорію</button></div>`
@@ -238,6 +305,17 @@ async function createCategory() {
   try {
     await api("/api/categories", { method: "POST", body: { name } });
     toast("Категорію створено");
+    go("categories");
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+async function deleteCategory(categoryName) {
+  if (!confirm(`Видалити категорію "${categoryName}"? Усі товари в ній також можуть бути видалені або втратять категорію.`)) return;
+  try {
+    await api(`/api/categories/${enc(categoryName)}`, { method: "DELETE" });
+    toast("Категорію видалено");
     go("categories");
   } catch (e) {
     toast(e.message);
@@ -325,25 +403,6 @@ async function deleteItem(itemId, category) {
     await api(`/api/items/${itemId}`, { method: "DELETE" });
     toast("Товар видалено");
     go("items", category);
-  } catch (e) {
-    toast(e.message);
-  }
-}
-  
-async function changeItemQty(itemId, sign) {
-  const raw = prompt(sign < 0 ? "Скільки списати зі складу?" : "Скільки додати на склад?", "1");
-  if (raw === null) return;
-  const amount = Number(raw);
-  if (!Number.isInteger(amount) || amount < 1) return toast("Вкажи ціле число більше нуля");
-  let reason = "";
-  if (sign < 0) {
-    reason = prompt("Причина списання (обов’язково):", "Використано у виробництві") || "";
-    if (!reason.trim()) return toast("Причина списання обов’язкова");
-  }
-  try {
-    await api(`/api/items/${itemId}/qty`, { method: "POST", body: { delta: sign * amount, reason } });
-    toast("Залишок оновлено");
-    go("item", itemId);
   } catch (e) {
     toast(e.message);
   }
@@ -626,7 +685,7 @@ route("admin", async () => {
           <option value="admin" ${u.role === "admin" ? "selected" : ""}>Адмін</option>
         </select>
       </div>`).join("") +
-    `<div class="row" style="margin-top:14px"><button class="btn secondary" onclick="go('adminlogs')">Історія операцій</button></div>`
+    `<div class="row" style="margin-top:14px"><button class="btn secondary" style="width:100%" onclick="go('adminlogs')">📜 Історія операцій</button></div>`
   );
 });
 
@@ -653,6 +712,7 @@ async function setUserRole(id, role) {
   try {
     await api(`/api/admin/users/${id}/role`, { method: "POST", body: { role } });
     toast("Роль оновлено");
+    go("admin");
   } catch (e) {
     toast(e.message);
     go("admin");
@@ -661,13 +721,20 @@ async function setUserRole(id, role) {
 
 route("adminlogs", async () => {
   render(topbar("Історія операцій", "admin") + `<div class="center">Завантаження…</div>`);
-  const rows = await api("/api/admin/logs?limit=200");
-  render(
-    topbar("Історія операцій", "admin") +
-    (rows.length
-      ? rows.map(r => `<div class="history"><b>${esc(r.item_name || "Видалений товар")} · ${r.action === "inc" ? "+" : "−"}${r.qty} шт.</b><br>${esc(r.username || "")} · ${esc(r.date || "")} ${r.box_name ? "· " + esc(r.box_name) : ""}<br>${esc(r.reason || "")}</div>`).join("")
-      : `<div class="empty">Операцій поки немає</div>`)
-  );
+  try {
+    const rows = await api("/api/admin/logs?limit=200");
+    render(
+      topbar("📜 Історія операцій", "admin") +
+      (rows && rows.length
+        ? rows.map(r => `<div class="history"><b>${esc(r.item_name || "Товар")} · ${r.action === "inc" ? "+" : "−"}${r.qty} шт.</b><br>${esc(r.username || "Користувач")} · ${esc(r.date || "")} ${r.box_name ? "· " + esc(r.box_name) : ""}<br>${esc(r.reason || "Без причини")}</div>`).join("")
+        : `<div class="empty">Операцій поки немає</div>`)
+    );
+  } catch (e) {
+    render(
+      topbar("📜 Історія операцій", "admin") +
+      `<div class="empty">Помилка завантаження історії: ${esc(e.message)}</div>`
+    );
+  }
 });
 
 async function boot() {
