@@ -288,7 +288,10 @@ route("item", async (id) => {
     </div>
     <div class="row" style="margin-bottom:14px">
       <button class="btn danger" onclick="changeItemQty(${item.id}, -1)">− Списати</button>
-      ${canEdit() ? `<button class="btn" onclick="changeItemQty(${item.id}, 1)">＋ Поповнити</button>` : ""}
+      ${canEdit() ? `
+        <button class="btn" onclick="changeItemQty(${item.id}, 1)">＋ Поповнити</button>
+        <button class="btn secondary" style="color:#e0433a" onclick="deleteItem(${item.id}, decodeURIComponent('${enc(item.category)}'))">🗑 Видалити товар</button>
+      ` : ""}
     </div>
     <h2>Історія операцій</h2>` +
     (history.length
@@ -297,6 +300,36 @@ route("item", async (id) => {
   );
 });
 
+async function changeItemQty(itemId, sign) {
+  const raw = prompt(sign < 0 ? "Скільки списати зі складу?" : "Скільки додати на склад?", "1");
+  if (raw === null) return;
+  const amount = Number(raw);
+  if (!Number.isInteger(amount) || amount < 1) return toast("Вкажи ціле число більше нуля");
+  let reason = "";
+  if (sign < 0) {
+    reason = prompt("Причина списання (обов’язково):", "Використано у виробництві") || "";
+    if (!reason.trim()) return toast("Причина списання обов’язкова");
+  }
+  try {
+    await api(`/api/items/${itemId}/qty`, { method: "POST", body: { delta: sign * amount, reason } });
+    toast("Залишок оновлено");
+    go("item", itemId);
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+async function deleteItem(itemId, category) {
+  if (!confirm("Видалити цей товар зі складу назавжди?")) return;
+  try {
+    await api(`/api/items/${itemId}`, { method: "DELETE" });
+    toast("Товар видалено");
+    go("items", category);
+  } catch (e) {
+    toast(e.message);
+  }
+}
+  
 async function changeItemQty(itemId, sign) {
   const raw = prompt(sign < 0 ? "Скільки списати зі складу?" : "Скільки додати на склад?", "1");
   if (raw === null) return;
