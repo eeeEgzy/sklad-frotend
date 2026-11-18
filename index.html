@@ -507,6 +507,29 @@ route("box", async (id) => {
   if (canEdit()) loadBoxItemOptions();
 });
 
+
+route('/api/shops', methods=['GET'])
+def get_shops():
+  with get_db() as conn:
+    conn.row_factory = sqlite3.Row
+    shops = conn.execute('SELECT * FROM shops').fetchall()
+    return jsonify([dict(shop) for shop in shops])
+
+
+route('/api/lines', methods=['GET'])
+def get_lines():
+  shop_id = request.args.get('shop_id')
+  with get_db() as conn:
+    conn.row_factory = sqlite3.Row
+    if shop_id:
+      lines = conn.execute(
+          'SELECT * FROM lines WHERE shop_id = ?', (shop_id,)
+      ).fetchall()
+    else:
+      lines = conn.execute('SELECT * FROM lines').fetchall()
+    return jsonify([dict(line) for line in lines])
+
+  
 async function loadBoxItemOptions() {
   try {
     const items = await api("/api/items");
