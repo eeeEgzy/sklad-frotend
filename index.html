@@ -39,11 +39,25 @@
   .card .title { font-size: 15px; font-weight: 500; }
   .card .sub { font-size: 12px; color: var(--hint); margin-top: 2px; }
   .menu-btn {
-    display: block; width: 100%; text-align: left;
-    background: var(--secondary-bg); color: var(--text);
-    border: none; border-radius: 12px;
-    padding: 14px 16px; margin-bottom: 8px;
-    font-size: 15px; cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+    text-align: left;
+    background: linear-gradient(135deg, var(--secondary-bg), rgba(255, 255, 255, 0.03));
+    color: var(--text);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 18px;
+    padding: 22px 20px;
+    margin-bottom: 14px;
+    font-size: 18px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    transition: transform 0.15s ease, background 0.15s ease;
+  }
+  .menu-btn:active {
+    transform: scale(0.97);
   }
   .qty, .qty-badge {
     font-weight: 600; font-size: 14px;
