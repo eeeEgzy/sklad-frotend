@@ -34,30 +34,52 @@
     display: flex; align-items: center; justify-content: space-between;
     gap: 10px;
   }
-  .card.click { cursor: pointer; }
-  .card-main { flex: 1; }
-  .card .title { font-size: 15px; font-weight: 500; }
-  .card .sub { font-size: 12px; color: var(--hint); margin-top: 2px; }
+  .card.click {
+    cursor: pointer;
+}
+.card.click:active {
+    transform: scale(0.97);
+    opacity: 0.9;
+}
+.card-main {
+    flex: 1;
+}
+.card .title {
+    font-size: 17px;
+    font-weight: 600;
+    color: #ffffff;
+}
+.card .sub {
+    font-size: 13px;
+    color: var(--hint);
+    margin-top: 3px;
+}
   .menu-btn {
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: 16px;
     width: 100%;
     text-align: left;
-    background: linear-gradient(135deg, var(--secondary-bg), rgba(255, 255, 255, 0.03));
-    color: var(--text);
+    background: #1c1c1e;
+    color: #ffffff;
     border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 18px;
-    padding: 22px 20px;
-    margin-bottom: 14px;
-    font-size: 18px;
+    border-radius: 16px;
+    padding: 20px 20px;
+    margin-bottom: 12px;
+    font-size: 17px;
     font-weight: 600;
     cursor: pointer;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-    transition: transform 0.15s ease, background 0.15s ease;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+    transition: all 0.2s ease;
   }
   .menu-btn:active {
     transform: scale(0.97);
+    opacity: 0.9;
+  }
+  .menu-btn.admin-btn {
+    background: linear-gradient(135deg, #1c1c1e, #2c1f1f);
+    border: 1px solid rgba(224, 67, 58, 0.4);
+    box-shadow: 0 4px 16px rgba(224, 67, 58, 0.15);
   }
   .qty, .qty-badge {
     font-weight: 600; font-size: 14px;
@@ -231,7 +253,7 @@ function hydratePhotos() {
 function itemControls(item, reasons) {
   return `<div class="form" style="margin-top:0">
     <input type="number" id="qty" value="1" min="1" inputmode="numeric" placeholder="Кількість">
-    <input type="text" id="reason" list="reasons-list" placeholder="Куди списали (машина, необов’язково)">
+    <input type="text" id="reason" list="reasons-list" placeholder="Куди списали (Необов’язково)">
     <datalist id="reasons-list">${reasons.map(r => `<option value="${esc(r)}">`).join("")}</datalist>
     <div class="row" style="flex-wrap:nowrap">
       <button class="btn danger" style="flex:1" onclick="changeItemQty(${item.id}, -1)">− Списати</button>
@@ -272,13 +294,13 @@ route("menu", async () => {
   const roleName = ROLE_LABELS[ME?.role] || "Працівник";
   render(`
     ${topbar("📦 Склад", null)}
-    ${ME ? `<div style="display:flex;align-items:center;gap:12px;margin:4px 0 14px">${avatar(ME.user_id, ME.username, 48)}<div><div style="font-weight:600">${esc(ME.username)}</div><div class="hint">${roleName}</div></div></div>` : ""}
+    ${ME ? `<div style="display:flex;align-items:center;gap:12px;margin:4px 0 16px">${avatar(ME.user_id, ME.username, 48)}<div><div style="font-weight:600">${esc(ME.username)}</div><div class="hint">${roleName}</div></div></div>` : ""}
     <button class="menu-btn" onclick="go('categories')">📦 Товари та категорії</button>
     <button class="menu-btn" onclick="go('search')">🔍 Пошук товару</button>
     <button class="menu-btn" onclick="go('deficit')">⚠️ Дефіцит і малі залишки</button>
     <button class="menu-btn" onclick="go('boxes')">🧰 Бокси</button>
     <button class="menu-btn" onclick="go('scan')">📷 Сканувати QR боксу</button>
-    ${canUsers() ? `<button class="menu-btn" onclick="go('admin')">⚙️ Адмінка</button>` : ""}
+    ${canUsers() ? `<button class="menu-btn admin-btn" onclick="go('admin')">⚙️ Адмінка</button>` : ""}
     ${ME && ME.status === "pending" ? `<p class="hint">Ваш акаунт очікує підтвердження адміністратора.</p>` : ""}
   `);
 });
@@ -387,7 +409,7 @@ async function deleteItem(itemId, category) {
     toast(e.message);
   }
 }
-  
+
 route("search", async () => {
   render(
     topbar("Пошук", "menu") +
