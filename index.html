@@ -81,6 +81,10 @@
     border: 1px solid rgba(224, 67, 58, 0.4);
     box-shadow: 0 4px 16px rgba(224, 67, 58, 0.15);
   }
+  .history.reverted { opacity: .55; }
+  .history.reverted b { text-decoration: line-through; }
+  .filters { display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-bottom:10px; }
+  .filters .full { grid-column: 1 / -1; }
   .card.deleting { outline: 2px solid #e0433a; color: #e0433a; }
   .btn:active { opacity: .85; }
   .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 50; }
@@ -197,8 +201,12 @@ function canUsers() {
   return ["admin", "manager"].includes(ME?.role);
 }
 
+function canUndo() {
+  return canEdit();
+}
+
 function canEdit() {
-  return ["admin", "manager", "editor"].includes(ME?.role);
+  return ["admin", "manager", "editor", "assistant"].includes(ME?.role);
 }
 
 function formField(labelText, id, type = "text", defaultVal = "") {
@@ -211,7 +219,7 @@ function itemCard(i, showCategory = true) {
       <div class="title">${esc(i.name)}</div>
       ${showCategory ? `<div class="sub">${esc(i.category || "")}</div>` : ""}
     </div>
-    <span class="qty ${i.quantity <= 4 ? "low" : ""}">${i.quantity} шт.</span>
+    <span class="qty ${i.quantity <= (i.min ?? 4) ? "low" : ""}">${i.quantity} шт.</span>
   </div>`;
 }
 
@@ -361,6 +369,8 @@ route("menu", async () => {
     <button class="menu-btn" onclick="go('boxes')">🧰 Бокси</button>
     <button class="menu-btn" onclick="go('scan')">📷 Сканувати QR боксу</button>
     ${canEdit() ? `<button class="menu-btn" onclick="go('reports')">📊 Звіти (Google Таблиці)</button>` : ""}
+    ${canUsers() ? `<button class="menu-btn" onclick="go('audit')">📋 Ревізія</button>` : ""}
+    <button class="menu-btn" onclick="go('adminlogs')">📜 Історія операцій</button>
     ${canUsers() ? `<button class="menu-btn admin-btn" onclick="go('admin')">⚙️ Адмінка</button>` : ""}
     ${ME && ME.status === "pending" ? `<p class="hint">Ваш акаунт очікує підтвердження адміністратора.</p>` : ""}
   `);
@@ -469,12 +479,13 @@ route("item", async (id) => {
         <div class="title">${esc(item.name)}</div>
         <div class="sub">${esc(item.category)}</div>
       </div>
-      <span class="qty ${item.quantity <= 4 ? "low" : ""}">${item.quantity} шт.</span>
+      <span class="qty ${item.quantity <= (item.min ?? 4) ? "low" : ""}">${item.quantity} шт.</span>
     </div>
     ${itemControls(item, reasons)}
+    ${canUsers() ? `<div class="form"><label for="minqty">Мінімальний залишок (при ньому приходить сповіщення в Telegram)</label><div class="row" style="flex-wrap:nowrap"><input type="number" id="minqty" value="${item.min_qty ?? ""}" placeholder="за замовч. ${Number(item.min)}" min="0" inputmode="numeric" style="flex:1"><button class="btn" onclick="saveMinQty(${item.id})">Зберегти</button></div></div>` : ""}
     <h2>Історія операцій</h2>` +
     (history.length
-      ? history.map(h => `<div class="history"><b>${h.action === "inc" ? "+" : "−"}${h.qty} шт.</b> · ${esc(h.username || "")} · ${fmtDate(h.date)}<br>${esc(h.reason || "")}</div>`).join("")
+      ? history.map(h => `<div class="history ${h.reverted ? "reverted" : ""}"><b>${h.action === "inc" ? "+" : "−"}${h.qty} шт.</b> · ${esc(h.username || "")} · ${fmtDate(h.date)}${h.reverted ? " · ↩️ скасовано" : ""}<br>${esc(h.reason || "")}</div>`).join("")
       : `<div class="empty">Історії поки немає</div>`)
   );
 });
@@ -535,27 +546,64 @@ function searchNow() {
 
 route("deficit", async () => {
   render(topbar("Дефіцит", "menu") + `<div class="center">Завантаження…</div>`);
-  const rows = await api("/api/deficit?threshold=4");
+  const rows = await api("/api/deficit");
   render(
     topbar("⚠️ Дефіцит", "menu") +
-    `<p class="hint">Показані товари із залишком 4 шт. або менше.</p>` +
+    `<p class="hint">Показані товари, залишок яких не більший за мінімальний (за замовчуванням 5 шт.).</p>` +
     (rows.length ? rows.map(i => itemCard(i)).join("") : `<div class="empty">Товарів із критично малим залишком немає</div>`)
   );
 });
 
+let BOXES = [];
+let boxDeleteMode = false;
+
 route("boxes", async () => {
+  boxDeleteMode = false;
   render(topbar("Бокси", "menu") + `<div class="center">Завантаження…</div>`);
-  const boxes = await api("/api/boxes");
+  BOXES = await api("/api/boxes");
+  renderBoxes();
+});
+
+function renderBoxes(typed = "") {
   render(
     topbar("🧰 Бокси", "menu") +
-    (boxes.length
-      ? boxes.map(b => `<div class="card click" onclick="go('box', ${b.id})"><div class="card-main"><div class="title">${esc(b.name)}</div><div class="sub">Товарів: ${b.item_count}</div></div><span>›</span></div>`).join("")
+    (boxDeleteMode ? `<p class="hint" style="color:#e0433a">Режим видалення: натисни на бокс, який треба видалити.</p>` : "") +
+    (BOXES.length
+      ? BOXES.map((b, i) => `<div class="card click ${boxDeleteMode ? "deleting" : ""}" onclick="boxClick(${i})"><div class="card-main"><div class="title">${esc(b.name)}</div><div class="sub">Товарів: ${Number(b.item_count)}</div></div><span>${boxDeleteMode ? "✕" : "›"}</span></div>`).join("")
       : `<div class="empty">Боксів поки немає</div>`) +
     (canEdit()
-      ? `<div class="form"><h2>Створити бокс</h2>${formField("Назва боксу", "boxname")}<button class="btn" onclick="createBox()">＋ Створити</button></div>`
+      ? `<div class="form"><h2>Створити бокс</h2>${formField("Назва боксу", "boxname", "text", typed)}<div class="row"><button class="btn" onclick="createBox()">＋ Створити бокс</button><button class="btn danger" onclick="toggleBoxDeleteMode()">${boxDeleteMode ? "Готово" : "－ Видалити бокс"}</button></div></div>`
       : "")
   );
-});
+}
+
+function boxClick(i) {
+  const box = BOXES[i];
+  if (!box) return;
+  if (boxDeleteMode) return deleteBox(box);
+  go("box", box.id);
+}
+
+function toggleBoxDeleteMode() {
+  const typed = document.getElementById("boxname")?.value || "";
+  boxDeleteMode = !boxDeleteMode;
+  renderBoxes(typed);
+}
+
+async function deleteBox(box) {
+  const extra = Number(box.item_count) > 0
+    ? ` У ньому ${Number(box.item_count)} товар(ів): вони залишаться на складі, просто більше не будуть закріплені за боксом.`
+    : "";
+  if (!(await confirmDlg(`Видалити бокс «${box.name}»?${extra}`))) return;
+  try {
+    await api("/api/boxes/" + box.id, { method: "DELETE" });
+    BOXES = BOXES.filter(b => b.id !== box.id);
+    toast("Бокс видалено");
+    renderBoxes();
+  } catch (e) {
+    toast(e.message);
+  }
+}
 
 async function createBox() {
   const name = document.getElementById("boxname").value.trim();
@@ -771,7 +819,6 @@ route("admin", async () => {
   const roleKeys = Object.keys(ROLE_LABELS).filter(r => r !== "admin" || ME.role === "admin");
   render(
     topbar("⚙️ Адмінка", "menu") +
-    `<div class="row" style="margin-bottom:6px"><button class="btn secondary" style="width:100%" onclick="go('adminlogs')">📜 Історія операцій</button></div>` +
     `<h2>Очікують підтвердження</h2>` +
     (pending.length
       ? pending.map(u => `
@@ -866,23 +913,155 @@ async function setUserRole(id, role) {
   }
 }
 
-route("adminlogs", async () => {
-  render(topbar("Історія операцій", "admin") + `<div class="center">Завантаження…</div>`);
+let logFilters = { q: "", user_id: "", action: "", period: "" };
+let logUsers = [];
+
+function logRowHtml(r) {
+  const sign = r.action === "inc" ? "＋" : "−";
+  const note = r.reverted ? " · ↩️ скасовано" : (r.undo_of ? " · ↩️ скасування" : (r.audit_id ? " · 📋 ревізія" : ""));
+  const undoBtn = canUndo() && !r.reverted && !r.undo_of
+    ? `<br><button class="btn secondary" style="margin-top:6px" onclick="undoLog(${Number(r.id)})">↩️ Скасувати операцію</button>` : "";
+  return `<div class="history ${r.reverted ? "reverted" : ""}"><b>${sign}${Number(r.qty)} шт. · ${esc(r.item_name || "видалений товар")}</b>${note}<br>👤 ${esc(r.username || r.user_id || "—")} · ${fmtDate(r.date)}${r.box_name ? "<br>🧰 " + esc(r.box_name) : ""}${r.reason ? "<br>📝 " + esc(r.reason) : ""}${undoBtn}</div>`;
+}
+
+function logFiltersHtml() {
+  const f = logFilters;
+  const opt = (v, label, cur) => `<option value="${esc(v)}" ${String(cur) === String(v) ? "selected" : ""}>${esc(label)}</option>`;
+  return `<div class="filters">
+    <input class="full" type="text" id="lf_q" value="${esc(f.q)}" placeholder="Товар, машина або бокс">
+    <select id="lf_period">${opt("", "Увесь час", f.period)}${opt("day", "Сьогодні", f.period)}${opt("week", "Останні 7 днів", f.period)}${opt("month", "Останні 30 днів", f.period)}</select>
+    <select id="lf_action">${opt("", "Усі дії", f.action)}${opt("dec", "Списання", f.action)}${opt("inc", "Надходження", f.action)}</select>
+    <select id="lf_user" class="full">${opt("", "Усі користувачі", f.user_id)}${logUsers.map(u => opt(u.user_id, u.username, f.user_id)).join("")}</select>
+    <button class="btn" onclick="applyLogFilters()">Застосувати</button>
+    <button class="btn secondary" onclick="resetLogFilters()">Скинути</button>
+  </div>`;
+}
+
+async function loadLogs() {
+  const params = new URLSearchParams({ limit: "300" });
+  Object.entries(logFilters).forEach(([k, v]) => { if (v) params.set(k, v); });
+  const box = document.getElementById("logsbox");
+  if (box) box.innerHTML = `<div class="center">Завантаження…</div>`;
   try {
-    const rows = await api("/api/admin/logs?limit=200");
-    render(
-      topbar("📜 Історія операцій", "admin") +
-      (rows && rows.length
-        ? rows.map(r => `<div class="history"><b>${r.action === "inc" ? "＋" : "−"}${Number(r.qty)} шт. · ${esc(r.item_name || "видалений товар")}</b><br>👤 ${esc(r.username || r.user_id || "—")} · ${fmtDate(r.date)}${r.box_name ? "<br>🧰 " + esc(r.box_name) : ""}${r.reason ? "<br>📝 " + esc(r.reason) : ""}</div>`).join("")
-        : `<div class="empty">Операцій поки немає</div>`)
-    );
+    const rows = await api("/api/logs?" + params.toString());
+    if (box) box.innerHTML = rows && rows.length ? rows.map(logRowHtml).join("") : `<div class="empty">Нічого не знайдено</div>`;
   } catch (e) {
-    render(
-      topbar("📜 Історія операцій", "admin") +
-      `<div class="empty">Помилка завантаження історії: ${esc(e.message)}</div>`
-    );
+    if (box) box.innerHTML = `<div class="empty">Помилка завантаження історії: ${esc(e.message)}</div>`;
   }
+}
+
+function applyLogFilters() {
+  logFilters = {
+    q: document.getElementById("lf_q").value.trim(),
+    user_id: document.getElementById("lf_user").value,
+    action: document.getElementById("lf_action").value,
+    period: document.getElementById("lf_period").value,
+  };
+  loadLogs();
+}
+
+function resetLogFilters() {
+  logFilters = { q: "", user_id: "", action: "", period: "" };
+  go("adminlogs");
+}
+
+async function undoLog(id) {
+  if (!(await confirmDlg("Скасувати цю операцію? Залишок повернеться до попереднього значення."))) return;
+  try {
+    await api(`/api/logs/${id}/undo`, { method: "POST" });
+    toast("Операцію скасовано");
+    loadLogs();
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+route("adminlogs", async () => {
+  render(topbar("📜 Історія операцій", "menu") + `<div class="center">Завантаження…</div>`);
+  try { logUsers = await api("/api/logs/users"); } catch (_e) { logUsers = []; }
+  render(topbar("📜 Історія операцій", "menu") + logFiltersHtml() + `<div id="logsbox"></div>`);
+  loadLogs();
 });
+
+async function saveMinQty(itemId) {
+  const v = document.getElementById("minqty").value.trim();
+  const min_qty = v === "" ? null : parseInt(v, 10);
+  if (min_qty !== null && (!Number.isInteger(min_qty) || min_qty < 0)) return toast("Мінімум — ціле число від 0");
+  try {
+    await api(`/api/items/${itemId}/min`, { method: "POST", body: { min_qty } });
+    toast("Мінімальний залишок збережено");
+    go("item", itemId);
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+// ================= РЕВІЗІЯ (зав складу / адмін) =================
+let AUDIT_CATS = [];
+let auditScope = "";
+
+route("audit", async () => {
+  if (!canUsers()) throw new Error("Недостатньо прав");
+  render(topbar("📋 Ревізія", "menu") + `<div class="center">Завантаження…</div>`);
+  AUDIT_CATS = await api("/api/categories");
+  render(
+    topbar("📋 Ревізія", "menu") +
+    `<p class="hint">Обери категорію, перерахуй товари на складі й внеси фактичну кількість. Розбіжності виправляться автоматично й потраплять в історію.</p>` +
+    AUDIT_CATS.map((c, i) => `<div class="card click" onclick="auditStart(${i})"><span class="title">${esc(c)}</span><span>›</span></div>`).join("")
+  );
+});
+
+async function auditStart(i) {
+  const name = AUDIT_CATS[i];
+  if (name === undefined) return;
+  go("auditcount", name);
+}
+
+route("auditcount", async (category) => {
+  if (!canUsers()) throw new Error("Недостатньо прав");
+  auditScope = String(category);
+  render(topbar(auditScope, "audit") + `<div class="center">Завантаження…</div>`);
+  const items = await api("/api/items?category=" + enc(auditScope));
+  render(
+    topbar("📋 " + auditScope, "audit") +
+    `<p class="hint">Вкажи, скільки є фактично (разом із тим, що лежить у боксах). Порожнє поле = не перераховував, товар не чіпаємо.</p>` +
+    (items.length
+      ? items.map(i => `<div class="card"><div class="card-main"><div class="title">${esc(i.name)}</div><div class="sub">У системі: ${Number(i.quantity)} шт.</div></div><input class="auditin" type="number" min="0" inputmode="numeric" data-id="${Number(i.id)}" data-exp="${Number(i.quantity)}" placeholder="${Number(i.quantity)}" style="width:90px"></div>`).join("") +
+        `<button class="btn" style="width:100%;margin-top:10px" onclick="applyAudit()">✅ Застосувати ревізію</button>`
+      : `<div class="empty">У цій категорії товарів немає</div>`)
+  );
+});
+
+async function applyAudit() {
+  const entries = [];
+  let diffs = 0;
+  document.querySelectorAll(".auditin").forEach(inp => {
+    const v = inp.value.trim();
+    if (v === "") return;
+    const counted = parseInt(v, 10);
+    if (!Number.isInteger(counted) || counted < 0) return;
+    entries.push({ item_id: Number(inp.dataset.id), counted });
+    if (counted !== Number(inp.dataset.exp)) diffs++;
+  });
+  if (!entries.length) return toast("Внеси хоча б одну кількість");
+  if (!(await confirmDlg(`Перераховано позицій: ${entries.length}. Розбіжностей: ${diffs}. Виправити залишки в системі?`))) return;
+  try {
+    const r = await api("/api/audit/apply", { method: "POST", body: { scope: auditScope, items: entries } });
+    renderAuditResult(r);
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+function renderAuditResult(r) {
+  render(
+    topbar("Результат ревізії", "audit") +
+    `<div class="card"><div class="card-main"><div class="title">Ревізія: ${esc(auditScope)}</div><div class="sub">Перераховано: ${Number(r.checked)} · збіглось: ${Number(r.matched)} · виправлено: ${r.changes.length}</div></div></div>` +
+    (r.changes.length ? "<h2>Розбіжності</h2>" + r.changes.map(c => `<div class="history"><b>${esc(c.name)}</b><br>Було ${Number(c.before)} → стало ${Number(c.after)} (${c.diff > 0 ? "+ надлишок " : "− нестача "}${Math.abs(Number(c.diff))} шт.)</div>`).join("") : `<div class="empty">Розбіжностей немає 👍</div>`) +
+    (r.errors.length ? "<h2>Не вдалося виправити</h2>" + r.errors.map(e => `<div class="history" style="color:#e0433a">${esc(e)}</div>`).join("") : "") +
+    `<button class="btn" style="width:100%;margin-top:10px" onclick="go('audit')">До списку категорій</button>`
+  );
+}
 
 async function boot() {
   try {
