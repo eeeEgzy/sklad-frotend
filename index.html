@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Склад</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg: var(--tg-theme-bg-color, #ffffff);
+    --text: var(--tg-theme-text-color, #111111);
+    --hint: var(--tg-theme-hint-color, #999999);
+    --link: var(--tg-theme-link-color, #2481cc);
+    --button: var(--tg-theme-button-color, #2481cc);
+    --button-text: var(--tg-theme-button-text-color, #ffffff);
+    --secondary-bg: var(--tg-theme-secondary-bg-color, #f0f0f0);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  #app { padding: 12px 14px 90px; max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 8px 0 14px; }
+  h2 { font-size: 16px; margin: 16px 0 8px; }
+  .card {
+    background: var(--secondary-bg);
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin-bottom: 8px;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px;
+  }
+  .card.click {
+    cursor: pointer;
+}
+.card.click:active {
+    transform: scale(0.97);
+    opacity: 0.9;
+}
+.card-main {
+    flex: 1;
+}
+.card .title {
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--text);
+}
+.card .sub {
+    font-size: 13px;
+    color: var(--hint);
+    margin-top: 3px;
+}
+  .menu-btn {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    width: 100%;
+    text-align: left;
+    background: #1c1c1e;
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    padding: 20px 20px;
+    margin-bottom: 12px;
+    font-size: 17px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+    transition: all 0.2s ease;
+  }
+  .menu-btn:active {
+    transform: scale(0.97);
+    opacity: 0.9;
+  }
+  .menu-btn.admin-btn {
+    background: linear-gradient(135deg, #1c1c1e, #2c1f1f);
+    border: 1px solid rgba(224, 67, 58, 0.4);
+    box-shadow: 0 4px 16px rgba(224, 67, 58, 0.15);
+  }
+  .card.deleting { outline: 2px solid #e0433a; color: #e0433a; }
+  .btn:active { opacity: .85; }
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 50; }
+  .modal { background: var(--bg); color: var(--text); border-radius: 14px; padding: 16px; width: 100%; max-width: 420px; }
+  .modal h2 { margin-top: 0; }
+  .qty, .qty-badge {
+    font-weight: 600; font-size: 14px;
+    padding: 4px 10px; border-radius: 10px;
+    background: var(--bg); white-space: nowrap;
+  }
+  .qty.low, .qty-low { color: #e0433a; }
+  .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .btn {
+    background: var(--button); color: var(--button-text);
+    border: none; border-radius: 10px;
+    padding: 10px 14px; font-size: 14px; cursor: pointer;
+  }
+  .btn.secondary { background: var(--secondary-bg); color: var(--text); }
+  .btn.danger { background: #e0433a; color: #fff; }
+  .btn:disabled { opacity: .5; }
+  .form {
+    background: var(--secondary-bg);
+    padding: 12px 14px; border-radius: 12px; margin-top: 14px;
+  }
+  .form h2 { margin-top: 0; }
+  label { display: block; font-size: 13px; color: var(--hint); margin-bottom: 4px; }
+  input, select {
+    width: 100%; padding: 10px 12px; border-radius: 10px;
+    border: 1px solid var(--hint); background: var(--bg); color: var(--text);
+    font-size: 15px; margin-bottom: 10px;
+  }
+  .topbar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .topbar .back { cursor: pointer; font-size: 22px; color: var(--link); padding: 2px 6px; }
+  .hint { color: var(--hint); font-size: 13px; margin: 6px 0 12px; }
+  .history, .history-item {
+    font-size: 13px; color: var(--text);
+    background: var(--secondary-bg); border-radius: 10px;
+    padding: 10px 12px; margin-bottom: 8px; line-height: 1.4;
+  }
+  .center { text-align: center; padding: 40px 0; color: var(--hint); }
+  .empty { text-align: center; padding: 24px 0; color: var(--hint); font-size: 14px; }
+  .video { width: 100%; max-height: 260px; background: #000; border-radius: 12px; margin-bottom: 10px; object-fit: cover; }
+  .qr { display: block; max-width: 220px; margin: 12px auto 4px; border-radius: 10px; }
+  .avatar { position: relative; flex: none; border-radius: 50%; overflow: hidden; background: var(--button); color: var(--button-text); display: flex; align-items: center; justify-content: center; font-weight: 600; }
+  .avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: none; }
+  .avatar img.on { display: block; }
+</style>
+</head>
+<body>
+<div id="app"><div class="center">Завантаження…</div></div>
+
+<script>
+const tg = window.Telegram ? window.Telegram.WebApp : null;
+if (tg) {
+  tg.ready();
+  tg.expand();
+}
+
+const API_BASE = window.SKLAD_API_BASE || "https://Valetnyn.pythonanywhere.com";
+const initData = (tg && tg.initData) ? tg.initData : "";
+
+let ME = null;
+const app = document.getElementById("app");
+
+function render(html) {
+  app.innerHTML = html;
+  hydratePhotos();
+}
+
+function esc(str) {
+  return String(str ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function enc(str) {
+  return encodeURIComponent(String(str ?? ""));
+}
+
+function isAdmin() {
+  return Boolean(ME && ME.role === "admin");
+}
+
+function canAdd() {
+  return ["admin", "manager", "editor", "assistant"].includes(ME?.role);
+}
+
+function canUsers() {
+  return ["admin", "manager"].includes(ME?.role);
+}
+
+function canEdit() {
+  return ["admin", "manager", "editor"].includes(ME?.role);
+}
+
+function formField(labelText, id, type = "text", defaultVal = "") {
+  return `<label for="${esc(id)}">${esc(labelText)}</label><input type="${esc(type)}" id="${esc(id)}" value="${esc(defaultVal)}">`;
+}
+
+function itemCard(i, showCategory = true) {
+  return `<div class="card click" onclick="go('item', ${Number(i.id)})">
+    <div class="card-main">
+      <div class="title">${esc(i.name)}</div>
+      ${showCategory ? `<div class="sub">${esc(i.category || "")}</div>` : ""}
+    </div>
+    <span class="qty ${i.quantity <= 4 ? "low" : ""}">${i.quantity} шт.</span>
+  </div>`;
+}
+
+function topbar(title, backTo = "menu") {
+  return `<div class="topbar">
+    ${backTo ? `<span class="back" onclick="go('${esc(backTo)}')">←</span>` : ""}
+    <h1 style="margin:0">${esc(title)}</h1>
+  </div>`;
+}
+
+function toast(msg) {
+  if (tg && tg.showAlert) {
+    try { tg.showAlert(String(msg)); return; } catch (_e) {}
+  }
+  alert(String(msg));
+}
+
+function confirmDlg(msg) {
+  return new Promise(resolve => {
+    if (tg && typeof tg.showConfirm === "function" && tg.isVersionAtLeast && tg.isVersionAtLeast("6.2")) {
+      try { tg.showConfirm(String(msg), ok => resolve(Boolean(ok))); return; } catch (_e) {}
+    }
+    resolve(window.confirm(String(msg)));
+  });
+}
+
+function askForm(title, fields) {
+  return new Promise(resolve => {
+    const ov = document.createElement("div");
+    ov.className = "modal-overlay";
+    ov.innerHTML = `<div class="modal"><h2>${esc(title)}</h2>` +
+      fields.map(f => `<label>${esc(f.label)}</label><input id="mf_${esc(f.id)}" type="${esc(f.type || "text")}" value="${esc(f.value || "")}" placeholder="${esc(f.placeholder || "")}" ${f.type === "number" ? 'inputmode="numeric" min="1"' : ""}>`).join("") +
+      `<div class="row" style="flex-wrap:nowrap"><button class="btn secondary" style="flex:1" id="mf_cancel">Скасувати</button><button class="btn" style="flex:1" id="mf_ok">ОК</button></div></div>`;
+    document.body.appendChild(ov);
+    const close = v => { ov.remove(); resolve(v); };
+    ov.querySelector("#mf_cancel").onclick = () => close(null);
+    ov.querySelector("#mf_ok").onclick = () => {
+      const out = {};
+      fields.forEach(f => { out[f.id] = ov.querySelector("#mf_" + f.id).value; });
+      close(out);
+    };
+  });
+}
+
+function openLink(url) {
+  if (tg && typeof tg.openLink === "function") { tg.openLink(url); return false; }
+  return true;
+}
+
+async function api(path, { method = "GET", body } = {}) {
+  const res = await fetch(API_BASE + path, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      "X-Telegram-Init-Data": initData,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    let msg = res.statusText || `Помилка ${res.status}`;
+    try {
+      const errJson = await res.json();
+      msg = errJson.detail || errJson.error || errJson.message || msg;
+    } catch (_e) {}
+    throw new Error(msg);
+  }
+  const ct = res.headers.get("content-type") || "";
+  return ct.includes("application/json") ? res.json() : res;
+}
+
+const ROLE_LABELS = { admin: "Адмін", manager: "Зав складу", editor: "Редактор", assistant: "Помічник складу", worker: "Працівник" };
+const ROLE_COLORS = { admin: "#2481cc", manager: "#8e44ad", editor: "#388a34", assistant: "#16a0a0", worker: "#e09f3a" };
+
+function fmtDate(str) {
+  const d = new Date(String(str).replace(" ", "T") + "Z");
+  return isNaN(d) ? esc(str) : d.toLocaleString("uk-UA", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+const photoCache = {};
+function avatar(uid, name, size) {
+  const ch = esc(String(name || "?").trim().charAt(0).toUpperCase());
+  return `<div class="avatar" style="width:${size}px;height:${size}px;font-size:${Math.round(size * 0.45)}px"><span>${ch}</span><img data-uid="${Number(uid)}" alt=""></div>`;
+}
+function hydratePhotos() {
+  document.querySelectorAll("img[data-uid]").forEach(async img => {
+    const uid = img.dataset.uid;
+    if (!(uid in photoCache)) {
+      photoCache[uid] = fetch(API_BASE + `/api/users/${uid}/photo`, { headers: { "X-Telegram-Init-Data": initData } })
+        .then(r => (r.ok ? r.blob() : null))
+        .then(b => (b ? URL.createObjectURL(b) : null))
+        .catch(() => null);
+    }
+    const url = await photoCache[uid];
+    if (url) { img.src = url; img.classList.add("on"); }
+  });
+}
+
+function itemControls(item, reasons) {
+  return `<div class="form" style="margin-top:0">
+    <input type="number" id="qty" value="1" min="1" inputmode="numeric" placeholder="Кількість">
+    <input type="text" id="reason" list="reasons-list" placeholder="Куди списали (Необов’язково)">
+    <datalist id="reasons-list">${reasons.map(r => `<option value="${esc(r)}">`).join("")}</datalist>
+    <div class="row" style="flex-wrap:nowrap">
+      <button class="btn danger" style="flex:1" onclick="changeItemQty(${item.id}, -1)">− Списати</button>
+      ${canAdd() ? `<button class="btn" style="flex:1" onclick="changeItemQty(${item.id}, 1)">＋ Поповнити</button>` : ""}
+    </div>
+    ${canEdit() ? `<button class="btn secondary" style="color:#e0433a;margin-top:10px" onclick="deleteItem(${item.id}, decodeURIComponent('${enc(item.category)}'))">🗑 Видалити товар</button>` : ""}
+  </div>`;
+}
+
+let lastRouteName = "menu";
+let lastRouteArgs = [];
+const routes = {};
+
+function route(name, fn) {
+  routes[name] = fn;
+}
+
+async function go(name, ...args) {
+  try {
+    stopScanner();
+    if (name === "previous") {
+      return await routes[lastRouteName](...lastRouteArgs);
+    }
+    if (name !== "scan" && name !== "item") {
+      lastRouteName = name;
+      lastRouteArgs = args;
+    }
+    if (!routes[name]) throw new Error(`Маршрут "${name}" не знайдено`);
+    await routes[name](...args);
+  } catch (e) {
+    toast("Помилка: " + e.message);
+  }
+}
+
+// ================= МАРШРУТИ =================
+
+route("menu", async () => {
+  const roleName = ROLE_LABELS[ME?.role] || "Працівник";
+  render(`
+    ${topbar("📦 Склад", null)}
+    ${ME ? `<div style="display:flex;align-items:center;gap:12px;margin:4px 0 16px">${avatar(ME.user_id, ME.username, 48)}<div><div style="font-weight:600">${esc(ME.username)}</div><div class="hint">${roleName}</div></div></div>` : ""}
+    <button class="menu-btn" onclick="go('categories')">📦 Товари та категорії</button>
+    <button class="menu-btn" onclick="go('search')">🔍 Пошук товару</button>
+    <button class="menu-btn" onclick="go('deficit')">⚠️ Дефіцит і малі залишки</button>
+    <button class="menu-btn" onclick="go('boxes')">🧰 Бокси</button>
+    <button class="menu-btn" onclick="go('scan')">📷 Сканувати QR боксу</button>
+    ${canEdit() ? `<button class="menu-btn" onclick="go('reports')">📊 Звіти (Google Таблиці)</button>` : ""}
+    ${canUsers() ? `<button class="menu-btn admin-btn" onclick="go('admin')">⚙️ Адмінка</button>` : ""}
+    ${ME && ME.status === "pending" ? `<p class="hint">Ваш акаунт очікує підтвердження адміністратора.</p>` : ""}
+  `);
+});
+
+let CATS = [];
+let deleteMode = false;
+
+route("categories", async () => {
+  deleteMode = false;
+  render(topbar("Категорії", "menu") + `<div class="center">Завантаження…</div>`);
+  CATS = await api("/api/categories");
+  renderCategories();
+});
+
+function renderCategories(typed = "") {
+  render(
+    topbar("📦 Категорії", "menu") +
+    (deleteMode ? `<p class="hint" style="color:#e0433a">Режим видалення: натисни на категорію, яку треба видалити.</p>` : "") +
+    (CATS.length
+      ? CATS.map((c, i) => `<div class="card click ${deleteMode ? "deleting" : ""}" onclick="catClick(${i})"><span class="title">${esc(c)}</span><span>${deleteMode ? "✕" : "›"}</span></div>`).join("")
+      : `<div class="empty">Категорій поки немає</div>`) +
+    (canEdit()
+      ? `<div class="form"><h2>Додати категорію</h2>${formField("Назва категорії", "newcat", "text", typed)}<div class="row"><button class="btn" onclick="createCategory()">＋ Створити категорію</button><button class="btn danger" onclick="toggleDeleteMode()">${deleteMode ? "Готово" : "－ Видалити категорію"}</button></div></div>`
+      : "")
+  );
+}
+
+function catClick(i) {
+  const name = CATS[i];
+  if (name === undefined) return;
+  if (deleteMode) return deleteCategory(name);
+  go("items", name);
+}
+
+function toggleDeleteMode() {
+  const typed = document.getElementById("newcat")?.value || "";
+  deleteMode = !deleteMode;
+  renderCategories(typed);
+}
+
+async function deleteCategory(name) {
+  if (!(await confirmDlg(`Видалити категорію «${name}»?`))) return;
+  try {
+    await api("/api/categories/delete", { method: "POST", body: { name } });
+    CATS = CATS.filter(c => c !== name);
+    toast("Категорію видалено");
+    renderCategories();
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+async function createCategory() {
+  const input = document.getElementById("newcat");
+  const name = input ? input.value.trim() : "";
+  if (!name) return toast("Введи назву категорії");
+  try {
+    await api("/api/categories", { method: "POST", body: { name } });
+    toast("Категорію створено");
+    go("categories");
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+route("items", async (category) => {
+  const catName = String(category);
+  render(topbar(catName, "categories") + `<div class="center">Завантаження товарів…</div>`);
+  const items = await api("/api/items?category=" + enc(catName));
+  render(
+    topbar(catName, "categories") +
+    (items.length
+      ? items.map(i => itemCard(i, false)).join("")
+      : `<div class="empty">У цій категорії товарів поки немає</div>`) +
+    (canEdit()
+      ? `<div class="form"><h2>Додати товар</h2>${formField("Назва товару", "newitem")}${formField("Початкова кількість", "newqty", "number", "0")}<button class="btn" onclick="createItem(decodeURIComponent('${enc(catName)}'))">＋ Додати товар</button></div>`
+      : "")
+  );
+});
+
+async function createItem(category) {
+  const name = document.getElementById("newitem").value.trim();
+  const quantity = Number(document.getElementById("newqty").value || 0);
+  if (!name) return toast("Введи назву товару");
+  if (!Number.isInteger(quantity) || quantity < 0) return toast("Кількість має бути цілим невід’ємним числом");
+  try {
+    await api("/api/items", { method: "POST", body: { name, quantity, category } });
+    toast("Товар додано");
+    go("items", category);
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+route("item", async (id) => {
+  render(topbar("Товар", "previous") + `<div class="center">Завантаження…</div>`);
+  const item = await api("/api/items/" + id);
+  const history = item.history || [];
+  let reasons = [];
+  try { reasons = await api("/api/reasons"); } catch (_e) {}
+  render(
+    topbar(item.name, "previous") +
+    `<div class="card">
+      <div class="card-main">
+        <div class="title">${esc(item.name)}</div>
+        <div class="sub">${esc(item.category)}</div>
+      </div>
+      <span class="qty ${item.quantity <= 4 ? "low" : ""}">${item.quantity} шт.</span>
+    </div>
+    ${itemControls(item, reasons)}
+    <h2>Історія операцій</h2>` +
+    (history.length
+      ? history.map(h => `<div class="history"><b>${h.action === "inc" ? "+" : "−"}${h.qty} шт.</b> · ${esc(h.username || "")} · ${fmtDate(h.date)}<br>${esc(h.reason || "")}</div>`).join("")
+      : `<div class="empty">Історії поки немає</div>`)
+  );
+});
+
+async function changeItemQty(itemId, sign) {
+  const amount = parseInt(document.getElementById("qty").value, 10);
+  const reason = (document.getElementById("reason").value || "").trim();
+  if (!Number.isInteger(amount) || amount < 1) return toast("Вкажи ціле число більше нуля");
+  try {
+    const body = { delta: sign * amount };
+    if (sign < 0 && reason) body.reason = reason;   // причина необов’язкова
+    await api(`/api/items/${itemId}/qty`, { method: "POST", body });
+    toast("Залишок оновлено");
+    go("item", itemId);
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+async function deleteItem(itemId, category) {
+  if (!(await confirmDlg("Видалити цей товар зі складу назавжди?"))) return;
+  try {
+    await api(`/api/items/${itemId}`, { method: "DELETE" });
+    toast("Товар видалено");
+    go("items", category);
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+route("search", async () => {
+  render(
+    topbar("Пошук", "menu") +
+    `<input type="text" id="q" placeholder="Назва товару або машини" oninput="searchNow()">
+     <div id="results" class="hint">Почни вводити назву товару</div>`
+  );
+});
+
+let searchTimer = null;
+function searchNow() {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(async () => {
+    const q = document.getElementById("q")?.value.trim();
+    const out = document.getElementById("results");
+    if (!out) return;
+    if (!q) {
+      out.textContent = "Почни вводити назву товару";
+      return;
+    }
+    try {
+      const rows = await api("/api/search?q=" + enc(q));
+      out.innerHTML = rows.length ? rows.map(i => itemCard(i)).join("") : `<div class="empty">Нічого не знайдено</div>`;
+    } catch (e) {
+      out.textContent = e.message;
+    }
+  }, 250);
+}
+
+route("deficit", async () => {
+  render(topbar("Дефіцит", "menu") + `<div class="center">Завантаження…</div>`);
+  const rows = await api("/api/deficit?threshold=4");
+  render(
+    topbar("⚠️ Дефіцит", "menu") +
+    `<p class="hint">Показані товари із залишком 4 шт. або менше.</p>` +
+    (rows.length ? rows.map(i => itemCard(i)).join("") : `<div class="empty">Товарів із критично малим залишком немає</div>`)
+  );
+});
+
+route("boxes", async () => {
+  render(topbar("Бокси", "menu") + `<div class="center">Завантаження…</div>`);
+  const boxes = await api("/api/boxes");
+  render(
+    topbar("🧰 Бокси", "menu") +
+    (boxes.length
+      ? boxes.map(b => `<div class="card click" onclick="go('box', ${b.id})"><div class="card-main"><div class="title">${esc(b.name)}</div><div class="sub">Товарів: ${b.item_count}</div></div><span>›</span></div>`).join("")
+      : `<div class="empty">Боксів поки немає</div>`) +
+    (canEdit()
+      ? `<div class="form"><h2>Створити бокс</h2>${formField("Назва боксу", "boxname")}<button class="btn" onclick="createBox()">＋ Створити</button></div>`
+      : "")
+  );
+});
+
+async function createBox() {
+  const name = document.getElementById("boxname").value.trim();
+  if (!name) return toast("Введи назву боксу");
+  try {
+    await api("/api/boxes", { method: "POST", body: { name } });
+    go("boxes");
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+route("box", async (id) => {
+  render(topbar("Бокс", "boxes") + `<div class="center">Завантаження…</div>`);
+  const box = await api("/api/boxes/" + id);
+  render(
+    topbar("🧰 " + box.name, "boxes") +
+    `<div class="row"><button class="btn secondary" onclick="showBoxQR(${id})">Показати QR</button></div>
+     <div id="qrholder"></div>
+     <h2>Товари в боксі</h2>` +
+    (box.items.length
+      ? box.items.map(i => `
+        <div class="card">
+          <div class="card-main">
+            <div class="title">${esc(i.name)}</div>
+            <div class="sub">${esc(i.category)}</div>
+            <div class="sub">У боксі: ${i.quantity} · Вільно поза боксами: ${i.free_quantity ?? "—"} · Усього: ${i.total_quantity}</div>
+          </div>
+          <span class="qty">${i.quantity} шт.</span>
+        </div>
+        <div class="row" style="margin:-3px 0 12px">
+          <button class="btn danger" onclick="changeBoxQty(${id}, ${i.item_id}, -1)">− Списати</button>
+          ${canAdd() && !canEdit() ? `<button class="btn" onclick="changeBoxQty(${id}, ${i.item_id}, 1)">＋ Поповнити</button>` : ""}
+          ${canEdit() ? `
+            <button class="btn" onclick="changeBoxQty(${id}, ${i.item_id}, 1)">＋ Поповнити</button>
+            <button class="btn secondary" onclick="removeBoxItem(${id}, ${i.item_id})">Прибрати з боксу</button>
+          ` : ""}
+        </div>`).join("")
+      : `<div class="empty">У боксі поки немає товарів</div>`) +
+    (canEdit()
+      ? `<div class="form"><h2>Додати товар у бокс</h2><label>Товар</label><select id="boxitem"><option value="">Завантаження…</option></select>${formField("Кількість для розміщення", "boxqty", "number", "1")}<button class="btn" onclick="addBoxItem(${id})">＋ Додати в бокс</button></div>`
+      : "")
+  );
+  if (canEdit()) loadBoxItemOptions();
+});
+
+async function loadBoxItemOptions() {
+  try {
+    const items = await api("/api/items");
+    const select = document.getElementById("boxitem");
+    if (select) {
+      select.innerHTML = `<option value="">Оберіть товар</option>` +
+        items.map(i => `<option value="${i.id}">${esc(i.name)} · доступно ${i.quantity}</option>`).join("");
+    }
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+async function addBoxItem(boxId) {
+  const item_id = Number(document.getElementById("boxitem").value);
+  const quantity = Number(document.getElementById("boxqty").value);
+  if (!item_id || !Number.isInteger(quantity) || quantity < 1) return toast("Оберіть товар і вкажіть кількість");
+  try {
+    await api(`/api/boxes/${boxId}/items`, { method: "POST", body: { item_id, quantity } });
+    go("box", boxId);
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+async function removeBoxItem(boxId, itemId) {
+  if (!(await confirmDlg("Прибрати цей товар із боксу? Загальний складський залишок не зміниться."))) return;
+  try {
+    await api(`/api/boxes/${boxId}/items/${itemId}`, { method: "DELETE" });
+    go("box", boxId);
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+async function changeBoxQty(boxId, itemId, sign) {
+  const fields = [{ id: "amount", label: sign < 0 ? "Скільки списати з боксу?" : "Скільки додати в бокс?", type: "number", value: "1" }];
+  if (sign < 0) fields.push({ id: "reason", label: "Куди списали (обов’язково)", placeholder: "напр. пудромлін" });
+  const res = await askForm(sign < 0 ? "Списання з боксу" : "Поповнення боксу", fields);
+  if (!res) return;
+  const amount = parseInt(res.amount, 10);
+  if (!Number.isInteger(amount) || amount < 1) return toast("Вкажи ціле число більше нуля");
+  const reason = (res.reason || "").trim();
+  if (sign < 0 && !reason) return toast("Причина списання обов’язкова");
+  try {
+    await api(`/api/boxes/${boxId}/items/${itemId}/qty`, { method: "POST", body: { delta: sign * amount, reason } });
+    toast("Залишок боксу оновлено");
+    go("box", boxId);
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+async function showBoxQR(id) {
+  try {
+    const response = await fetch(`${API_BASE}/api/boxes/${id}/qr`, {
+      headers: { "X-Telegram-Init-Data": initData }
+    });
+    if (!response.ok) throw new Error("Не вдалося отримати QR-код");
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const holder = document.getElementById("qrholder");
+    if (holder) {
+      holder.innerHTML = `<img class="qr" src="${url}" alt="QR боксу"><p class="hint center">QR-код боксу №${id}</p>`;
+    }
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+let cameraStream = null, scanLoop = false;
+route("scan", async () => {
+  render(
+    topbar("Сканер QR", "menu") +
+    `<p class="hint">Наведи камеру на QR-код боксу. Якщо камера недоступна, введи код вручну (наприклад: box_12).</p>
+     <video id="camera" class="video" autoplay playsinline></video>
+     <div class="row">
+       <button class="btn" onclick="startScanner()">Увімкнути камеру</button>
+       <button class="btn secondary" onclick="stopScanner()">Зупинити</button>
+     </div>
+     <div class="form">
+       <label>Код боксу</label>
+       <input type="text" id="manualqr" placeholder="box_12">
+       <button class="btn" onclick="openScannedCode()">Відкрити бокс</button>
+     </div>
+     <div id="scanstatus" class="hint"></div>`
+  );
+});
+
+async function startScanner() {
+  if (tg && typeof tg.showScanQrPopup === "function") {
+    try {
+      tg.showScanQrPopup({ text: "Наведіть камеру на QR-код боксу" }, (text) => {
+        const field = document.getElementById("manualqr");
+        if (field) field.value = text;
+        tg.closeScanQrPopup();
+        openScannedCode();
+        return true;
+      });
+      return;
+    } catch (_e) {}
+  }
+  try {
+    if (!("BarcodeDetector" in window)) {
+      throw new Error("Вбудований QR-сканер недоступний. Введи код вручну або відкрий Mini App у Telegram.");
+    }
+    stopScanner();
+    cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
+    const video = document.getElementById("camera");
+    video.srcObject = cameraStream;
+    const detector = new BarcodeDetector({ formats: ["qr_code"] });
+    scanLoop = true;
+    const tick = async () => {
+      if (!scanLoop || !video || video.readyState < 2) return requestAnimationFrame(tick);
+      try {
+        const codes = await detector.detect(video);
+        if (codes.length) {
+          document.getElementById("manualqr").value = codes[0].rawValue;
+          stopScanner();
+          openScannedCode();
+          return;
+        }
+      } catch (_e) {}
+      requestAnimationFrame(tick);
+    };
+    video.onloadedmetadata = () => video.play().then(tick);
+  } catch (e) {
+    toast(e.message || "Не вдалося запустити камеру");
+  }
+}
+
+function stopScanner() {
+  scanLoop = false;
+  if (cameraStream) {
+    cameraStream.getTracks().forEach(t => t.stop());
+    cameraStream = null;
+  }
+  const video = document.getElementById("camera");
+  if (video) video.srcObject = null;
+}
+
+function openScannedCode() {
+  const code = (document.getElementById("manualqr")?.value || "").trim();
+  const match = code.match(/^(box|item)_(\d+)$/i);
+  if (!match) return toast("Невірний QR-код. Очікується код виду box_12 або item_7");
+  stopScanner();
+  go(match[1].toLowerCase(), Number(match[2]));
+}
+
+route("reports", async () => {
+  if (!canEdit()) throw new Error("Недостатньо прав");
+  render(
+    topbar("📊 Звіти", "menu") +
+    `<p class="hint">Звіт створюється в Google Таблиці: підсумок по товарах і всі операції за період.</p>
+     <div class="row" style="flex-wrap:nowrap">
+       <button class="btn rep-btn" style="flex:1" onclick="makeReport('day')">День</button>
+       <button class="btn rep-btn" style="flex:1" onclick="makeReport('week')">Тиждень</button>
+       <button class="btn rep-btn" style="flex:1" onclick="makeReport('month')">Місяць</button>
+     </div>
+     <div id="reportstatus" class="hint">Тиждень = останні 7 днів, місяць = останні 30 днів.</div>`
+  );
+});
+
+route("admin", async () => {
+  render(topbar("Адмінка", "menu") + `<div class="center">Завантаження…</div>`);
+  const [pending, users] = await Promise.all([api("/api/admin/pending"), api("/api/admin/users")]);
+  const roleKeys = Object.keys(ROLE_LABELS).filter(r => r !== "admin" || ME.role === "admin");
+  render(
+    topbar("⚙️ Адмінка", "menu") +
+    `<div class="row" style="margin-bottom:6px"><button class="btn secondary" style="width:100%" onclick="go('adminlogs')">📜 Історія операцій</button></div>` +
+    `<h2>Очікують підтвердження</h2>` +
+    (pending.length
+      ? pending.map(u => `
+        <div class="card">
+          ${avatar(u.user_id, u.username, 40)}
+          <div class="card-main">
+            <div class="title">${esc(u.username)}</div>
+            <div class="sub">ID: ${u.user_id}</div>
+          </div>
+          <div class="row">
+            <button class="btn" onclick="approveUser(${u.user_id})">✓</button>
+            <button class="btn danger" onclick="rejectUser(${u.user_id})">×</button>
+          </div>
+        </div>`).join("")
+      : `<div class="empty">Немає нових заявок</div>`) +
+    `<h2>Користувачі та ролі</h2>` +
+    users.filter(u => u.status !== "pending").map(u => {
+      const mine = ME && u.user_id === ME.user_id;
+      const locked = u.role === "admin" && ME.role !== "admin";
+      return `
+      <div class="card" style="align-items:flex-start">
+        ${avatar(u.user_id, u.username, 44)}
+        <div class="card-main">
+          <div class="title">${esc(u.username)}</div>
+          <div class="sub">ID: ${u.user_id} · ${esc(ROLE_LABELS[u.role] || u.role)}</div>
+          ${(mine || locked) ? "" : `
+          <div class="row" style="margin-top:8px">
+            <select style="width:auto;margin:0" onchange="setUserRole(${u.user_id}, this.value)">
+              ${roleKeys.map(r => `<option value="${r}" ${u.role === r ? "selected" : ""}>${esc(ROLE_LABELS[r])}</option>`).join("")}
+            </select>
+            <button class="btn danger" style="padding:6px 10px;font-size:12px" onclick="removeUser(${u.user_id}, '${enc(u.username || u.user_id)}')">🗑 Видалити</button>
+          </div>`}
+        </div>
+      </div>`;
+    }).join("")
+  );
+});
+
+async function makeReport(period) {
+  const status = document.getElementById("reportstatus");
+  const btns = document.querySelectorAll(".rep-btn");
+  btns.forEach(b => { b.disabled = true; });
+  if (status) status.textContent = "⏳ Формую звіт, зачекай…";
+  try {
+    const r = await api("/api/admin/report", { method: "POST", body: { period } });
+    if (status) status.innerHTML = `✅ Готово, операцій: ${Number(r.operations)}. <a href="${esc(r.url)}" target="_blank" onclick="return openLink(this.href)">Відкрити таблицю</a>`;
+  } catch (e) {
+    if (status) status.textContent = "❌ " + e.message;
+  } finally {
+    btns.forEach(b => { b.disabled = false; });
+  }
+}
+
+async function approveUser(id) {
+  try {
+    await api(`/api/admin/approve/${id}`, { method: "POST", body: {} });
+    go("admin");
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+async function rejectUser(id) {
+  if (!(await confirmDlg("Видалити заявку цього користувача?"))) return;
+  try {
+    await api(`/api/admin/reject/${id}`, { method: "POST", body: {} });
+    go("admin");
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+async function removeUser(id, nameEnc) {
+  if (!(await confirmDlg(`Видалити ${decodeURIComponent(nameEnc)}? Користувач втратить доступ до складу.`))) return;
+  try {
+    await api(`/api/admin/users/${id}`, { method: "DELETE" });
+    toast("Користувача видалено");
+    go("admin");
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+async function setUserRole(id, role) {
+  try {
+    await api(`/api/admin/users/${id}/role`, { method: "POST", body: { role } });
+    toast("Роль оновлено");
+    go("admin");
+  } catch (e) {
+    toast(e.message);
+    go("admin");
+  }
+}
+
+route("adminlogs", async () => {
+  render(topbar("Історія операцій", "admin") + `<div class="center">Завантаження…</div>`);
+  try {
+    const rows = await api("/api/admin/logs?limit=200");
+    render(
+      topbar("📜 Історія операцій", "admin") +
+      (rows && rows.length
+        ? rows.map(r => `<div class="history"><b>${r.action === "inc" ? "＋" : "−"}${Number(r.qty)} шт. · ${esc(r.item_name || "видалений товар")}</b><br>👤 ${esc(r.username || r.user_id || "—")} · ${fmtDate(r.date)}${r.box_name ? "<br>🧰 " + esc(r.box_name) : ""}${r.reason ? "<br>📝 " + esc(r.reason) : ""}</div>`).join("")
+        : `<div class="empty">Операцій поки немає</div>`)
+    );
+  } catch (e) {
+    render(
+      topbar("📜 Історія операцій", "admin") +
+      `<div class="empty">Помилка завантаження історії: ${esc(e.message)}</div>`
+    );
+  }
+});
+
+async function boot() {
+  try {
+    if (!tg || !initData) {
+      throw new Error("Відкрий Mini App через Telegram, щоб передати дані авторизації.");
+    }
+    ME = await api("/api/me");
+    if (ME.status === "removed") {
+      render(topbar("Доступ закрито", null) + `<div class="center">Адміністратор закрив вам доступ до складу.</div>`);
+      return;
+    }
+    if (ME.status === "pending") {
+      render(
+        topbar("Очікування підтвердження", null) +
+        `<div class="center">Ваш запит на доступ до складу надіслано адміністратору.<br><br>Після підтвердження закрийте та знову відкрийте застосунок.</div>`
+      );
+      return;
+    }
+    await go("menu");
+  } catch (e) {
+    render(
+      topbar("Не вдалося увійти", null) +
+      `<div class="center">${esc(e.message)}<br><br><button class="btn" onclick="boot()">Спробувати ще раз</button></div>`
+    );
+  }
+}
+
+window.addEventListener("beforeunload", stopScanner);
+boot();
+</script>
+</body>
+</html>
