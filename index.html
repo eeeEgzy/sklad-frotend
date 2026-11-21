@@ -89,7 +89,7 @@
   .st-work { background:#1f7a3d; color:#fff; }
   .st-maintenance { background:#2f6fed; color:#fff; }
   .st-repair { background:#c0392b; color:#fff; }
-  .st-line_down { background:#f57c00; color:#fff; }
+  .st-line_down { background:#e8710a; color:#fff; }
   .st-planned { background:#f5c518; color:#111; }
   .warn-legend { display:flex; flex-wrap:wrap; gap:6px 14px; font-size:12px; color:var(--hint); margin:0 0 12px; }
   .warn-legend span { display:inline-flex; align-items:center; gap:4px; }
@@ -99,6 +99,7 @@
   .history.reverted b { text-decoration: line-through; }
   .filters { display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-bottom:10px; }
   .filters .full { grid-column: 1 / -1; }
+  .card.unitmode { outline: 2px solid #2f6fed; }
   .card.deleting { outline: 2px solid #e0433a; color: #e0433a; }
   .btn:active { opacity: .85; }
   input::placeholder, textarea::placeholder { color: #9a9aa3; -webkit-text-fill-color: #9a9aa3; }
@@ -249,7 +250,7 @@ function itemCard(i, showCategory = true) {
       <div class="title">${esc(i.name)}</div>
       ${showCategory ? `<div class="sub">${esc(i.category || "")}</div>` : ""}
     </div>
-    <span class="qty ${i.quantity <= (i.min ?? 4) ? "low" : ""}">${i.quantity} шт.</span>
+    <span class="qty ${i.quantity <= (i.min ?? 4) ? "low" : ""}">${i.quantity} ${uLabel(i.unit)}</span>
   </div>`;
 }
 
@@ -327,6 +328,11 @@ async function api(path, { method = "GET", body } = {}) {
 
 const ROLE_LABELS = { admin: "Адмін", manager: "Зав складу", editor: "Редактор", assistant: "Помічник складу", worker: "Працівник" };
 const ROLE_COLORS = { admin: "#2481cc", manager: "#8e44ad", editor: "#388a34", assistant: "#16a0a0", worker: "#e09f3a" };
+
+// одиниця виміру: «шт» показуємо з крапкою, м/см/мм — як є
+function uLabel(u) {
+  return !u || u === "шт" ? "шт." : esc(u);
+}
 
 function fmtDate(str) {
   const d = new Date(String(str).replace(" ", "T") + "Z");
@@ -412,12 +418,22 @@ route("menu", async () => {
 });
 
 let CATS = [];
+let UNITS = {};
 let deleteMode = false;
+let unitMode = false;
+const UNIT_OPTIONS = [
+  { value: "шт", label: "шт — штуки" },
+  { value: "м", label: "м — метри" },
+  { value: "см", label: "см — сантиметри" },
+  { value: "мм", label: "мм — міліметри" },
+];
 
 route("categories", async () => {
   deleteMode = false;
+  unitMode = false;
   render(topbar("Категорії", "menu") + `<div class="center">Завантаження…</div>`);
   CATS = await api("/api/categories");
+  try { UNITS = await api("/api/categories/units"); } catch (_e) { UNITS = {}; }
   renderCategories();
 });
 
@@ -425,11 +441,16 @@ function renderCategories(typed = "") {
   render(
     topbar("📦 Категорії", "menu") +
     (deleteMode ? `<p class="hint" style="color:#e0433a">Режим видалення: натисни на категорію, яку треба видалити.</p>` : "") +
+    (unitMode ? `<p class="hint" style="color:#2f6fed">Режим одиниць: натисни на категорію, щоб змінити одиницю виміру (шт, м, см, мм).</p>` : "") +
     (CATS.length
-      ? CATS.map((c, i) => `<div class="card click ${deleteMode ? "deleting" : ""}" onclick="catClick(${i})"><span class="title">${esc(c)}</span><span>${deleteMode ? "✕" : "›"}</span></div>`).join("")
+      ? CATS.map((c, i) => {
+        const u = UNITS[c] || "шт";
+        const right = deleteMode ? "✕" : unitMode ? `✎ ${esc(u)}` : (u !== "шт" ? `<span style="font-size:14px;color:var(--hint);margin-right:6px">${esc(u)}</span>›` : "›");
+        return `<div class="card click ${deleteMode ? "deleting" : ""} ${unitMode ? "unitmode" : ""}" onclick="catClick(${i})"><span class="title">${esc(c)}</span><span>${right}</span></div>`;
+      }).join("")
       : `<div class="empty">Категорій поки немає</div>`) +
     (canEdit()
-      ? `<div class="form"><h2>Додати категорію</h2>${formField("Назва категорії", "newcat", "text", typed)}<div class="row"><button class="btn" onclick="createCategory()">＋ Створити категорію</button><button class="btn danger" onclick="toggleDeleteMode()">${deleteMode ? "Готово" : "－ Видалити категорію"}</button></div></div>`
+      ? `<div class="form"><h2>Додати категорію</h2>${formField("Назва категорії", "newcat", "text", typed)}<label for="newunit">Одиниця виміру</label><select id="newunit">${UNIT_OPTIONS.map(o => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join("")}</select><div class="row"><button class="btn" onclick="createCategory()">＋ Створити категорію</button><button class="btn danger" onclick="toggleDeleteMode()">${deleteMode ? "Готово" : "－ Видалити категорію"}</button></div><div class="row" style="margin-top:8px"><button class="btn secondary" onclick="toggleUnitMode()">${unitMode ? "Готово" : "📏 Змінити одиницю виміру"}</button></div></div>`
       : "")
   );
 }
@@ -438,13 +459,37 @@ function catClick(i) {
   const name = CATS[i];
   if (name === undefined) return;
   if (deleteMode) return deleteCategory(name);
+  if (unitMode) return changeCategoryUnit(name);
   go("items", name);
 }
 
 function toggleDeleteMode() {
   const typed = document.getElementById("newcat")?.value || "";
   deleteMode = !deleteMode;
+  unitMode = false;
   renderCategories(typed);
+}
+
+function toggleUnitMode() {
+  const typed = document.getElementById("newcat")?.value || "";
+  unitMode = !unitMode;
+  deleteMode = false;
+  renderCategories(typed);
+}
+
+async function changeCategoryUnit(name) {
+  const res = await askForm(`Одиниця виміру: ${name}`, [
+    { id: "unit", label: "Рахувати в", type: "select", value: UNITS[name] || "шт", options: UNIT_OPTIONS },
+  ]);
+  if (!res) return;
+  try {
+    await api("/api/categories/unit", { method: "POST", body: { name, unit: res.unit } });
+    UNITS[name] = res.unit;
+    toast("Одиницю змінено");
+    renderCategories();
+  } catch (e) {
+    toast(e.message);
+  }
 }
 
 async function deleteCategory(name) {
@@ -464,7 +509,8 @@ async function createCategory() {
   const name = input ? input.value.trim() : "";
   if (!name) return toast("Введи назву категорії");
   try {
-    await api("/api/categories", { method: "POST", body: { name } });
+    const unit = document.getElementById("newunit")?.value || "шт";
+    await api("/api/categories", { method: "POST", body: { name, unit } });
     toast("Категорію створено");
     go("categories");
   } catch (e) {
@@ -476,13 +522,15 @@ route("items", async (category) => {
   const catName = String(category);
   render(topbar(catName, "categories") + `<div class="center">Завантаження товарів…</div>`);
   const items = await api("/api/items?category=" + enc(catName));
+  if (!(catName in UNITS)) { try { UNITS = await api("/api/categories/units"); } catch (_e) {} }
+  const catUnit = UNITS[catName] || (items[0] && items[0].unit) || "шт";
   render(
     topbar(catName, "categories") +
     (items.length
       ? items.map(i => itemCard(i, false)).join("")
       : `<div class="empty">У цій категорії товарів поки немає</div>`) +
     (canEdit()
-      ? `<div class="form"><h2>Додати товар</h2>${formField("Назва товару", "newitem")}${formField("Початкова кількість", "newqty", "number", "0")}<button class="btn" onclick="createItem(decodeURIComponent('${enc(catName)}'))">＋ Додати товар</button></div>`
+      ? `<div class="form"><h2>Додати товар</h2>${formField("Назва товару", "newitem")}${formField("Початкова кількість (" + catUnit + ")", "newqty", "number", "0")}<button class="btn" onclick="createItem(decodeURIComponent('${enc(catName)}'))">＋ Додати товар</button></div>`
       : "")
   );
 });
@@ -514,13 +562,13 @@ route("item", async (id) => {
         <div class="title">${esc(item.name)}</div>
         <div class="sub">${esc(item.category)}</div>
       </div>
-      <span class="qty ${item.quantity <= (item.min ?? 4) ? "low" : ""}">${item.quantity} шт.</span>
+      <span class="qty ${item.quantity <= (item.min ?? 4) ? "low" : ""}">${item.quantity} ${uLabel(item.unit)}</span>
     </div>
     ${itemControls(item, reasons)}
     ${canUsers() ? `<div class="form"><label for="minqty">Мінімальний залишок (при ньому приходить сповіщення в Telegram)</label><div class="row" style="flex-wrap:nowrap"><input type="number" id="minqty" value="${item.min_qty ?? ""}" placeholder="за замовч. ${Number(item.min)}" min="0" inputmode="numeric" style="flex:1"><button class="btn" onclick="saveMinQty(${item.id})">Зберегти</button></div></div>` : ""}
     <h2>Історія операцій</h2>` +
     (history.length
-      ? history.map(h => `<div class="history ${h.reverted ? "reverted" : ""}"><b>${h.action === "inc" ? "+" : "−"}${h.qty} шт.</b> · ${esc(h.username || "")} · ${fmtDate(h.date)}${h.reverted ? " · ↩️ скасовано" : ""}<br>${esc(h.reason || "")}</div>`).join("")
+      ? history.map(h => `<div class="history ${h.reverted ? "reverted" : ""}"><b>${h.action === "inc" ? "+" : "−"}${h.qty} ${uLabel(item.unit)}</b> · ${esc(h.username || "")} · ${fmtDate(h.date)}${h.reverted ? " · ↩️ скасовано" : ""}<br>${esc(h.reason || "")}</div>`).join("")
       : `<div class="empty">Історії поки немає</div>`)
   );
 });
@@ -584,7 +632,7 @@ route("deficit", async () => {
   const rows = await api("/api/deficit");
   render(
     topbar("⚠️ Дефіцит", "menu") +
-    `<p class="hint">Показані товари, залишок яких не більший за мінімальний (за замовчуванням 5 шт.).</p>` +
+    `<p class="hint">Показані товари, залишок яких не більший за мінімальний (за замовчуванням 5).</p>` +
     (rows.length ? rows.map(i => itemCard(i)).join("") : `<div class="empty">Товарів із критично малим залишком немає</div>`)
   );
 });
@@ -667,7 +715,7 @@ route("box", async (id) => {
             <div class="sub">${esc(i.category)}</div>
             <div class="sub">У боксі: ${i.quantity} · Вільно поза боксами: ${i.free_quantity ?? "—"} · Усього: ${i.total_quantity}</div>
           </div>
-          <span class="qty">${i.quantity} шт.</span>
+          <span class="qty">${i.quantity} ${uLabel(i.unit)}</span>
         </div>
         <div class="row" style="margin:-3px 0 12px">
           <button class="btn danger" onclick="changeBoxQty(${id}, ${i.item_id}, -1)">− Списати</button>
@@ -956,7 +1004,7 @@ function logRowHtml(r) {
   const note = r.reverted ? " · ↩️ скасовано" : (r.undo_of ? " · ↩️ скасування" : (r.audit_id ? " · 📋 ревізія" : ""));
   const undoBtn = canUndo() && !r.reverted && !r.undo_of
     ? `<br><button class="btn secondary" style="margin-top:6px" onclick="undoLog(${Number(r.id)})">↩️ Скасувати операцію</button>` : "";
-  return `<div class="history ${r.reverted ? "reverted" : ""}"><b>${sign}${Number(r.qty)} шт. · ${esc(r.item_name || "видалений товар")}</b>${note}<br>👤 ${esc(r.username || r.user_id || "—")} · ${fmtDate(r.date)}${r.box_name ? "<br>🧰 " + esc(r.box_name) : ""}${r.reason ? "<br>📝 " + esc(r.reason) : ""}${undoBtn}</div>`;
+  return `<div class="history ${r.reverted ? "reverted" : ""}"><b>${sign}${Number(r.qty)} ${uLabel(r.unit)} · ${esc(r.item_name || "видалений товар")}</b>${note}<br>👤 ${esc(r.username || r.user_id || "—")} · ${fmtDate(r.date)}${r.box_name ? "<br>🧰 " + esc(r.box_name) : ""}${r.reason ? "<br>📝 " + esc(r.reason) : ""}${undoBtn}</div>`;
 }
 
 function logFiltersHtml() {
@@ -1061,7 +1109,7 @@ route("auditcount", async (category) => {
     topbar("📋 " + auditScope, "audit") +
     `<p class="hint">Вкажи, скільки є фактично (разом із тим, що лежить у боксах). Порожнє поле = не перераховував, товар не чіпаємо.</p>` +
     (items.length
-      ? items.map(i => `<div class="card"><div class="card-main"><div class="title">${esc(i.name)}</div><div class="sub">У системі: ${Number(i.quantity)} шт.</div></div><input class="auditin" type="number" min="0" inputmode="numeric" data-id="${Number(i.id)}" data-exp="${Number(i.quantity)}" placeholder="${Number(i.quantity)}" style="width:90px"></div>`).join("") +
+      ? items.map(i => `<div class="card"><div class="card-main"><div class="title">${esc(i.name)}</div><div class="sub">У системі: ${Number(i.quantity)} ${uLabel(i.unit)}</div></div><input class="auditin" type="number" min="0" inputmode="numeric" data-id="${Number(i.id)}" data-exp="${Number(i.quantity)}" placeholder="${Number(i.quantity)}" style="width:90px"></div>`).join("") +
         `<button class="btn" style="width:100%;margin-top:10px" onclick="applyAudit()">✅ Застосувати ревізію</button>`
       : `<div class="empty">У цій категорії товарів немає</div>`)
   );
@@ -1092,7 +1140,7 @@ function renderAuditResult(r) {
   render(
     topbar("Результат ревізії", "audit") +
     `<div class="card"><div class="card-main"><div class="title">Ревізія: ${esc(auditScope)}</div><div class="sub">Перераховано: ${Number(r.checked)} · збіглось: ${Number(r.matched)} · виправлено: ${r.changes.length}</div></div></div>` +
-    (r.changes.length ? "<h2>Розбіжності</h2>" + r.changes.map(c => `<div class="history"><b>${esc(c.name)}</b><br>Було ${Number(c.before)} → стало ${Number(c.after)} (${c.diff > 0 ? "+ надлишок " : "− нестача "}${Math.abs(Number(c.diff))} шт.)</div>`).join("") : `<div class="empty">Розбіжностей немає 👍</div>`) +
+    (r.changes.length ? "<h2>Розбіжності</h2>" + r.changes.map(c => `<div class="history"><b>${esc(c.name)}</b><br>Було ${Number(c.before)} → стало ${Number(c.after)} (${c.diff > 0 ? "+ надлишок " : "− нестача "}${Math.abs(Number(c.diff))} ${uLabel(c.unit)})</div>`).join("") : `<div class="empty">Розбіжностей немає 👍</div>`) +
     (r.errors.length ? "<h2>Не вдалося виправити</h2>" + r.errors.map(e => `<div class="history" style="color:#e0433a">${esc(e)}</div>`).join("") : "") +
     `<button class="btn" style="width:100%;margin-top:10px" onclick="go('audit')">До списку категорій</button>`
   );
@@ -1112,7 +1160,7 @@ const WARN_COLORS = {
   maintenance: ["#2f6fed", "#1d4fb8", "#ffffff"], // синій  — планове ТО
   planned: ["#f5c518", "#b38f00", "#111111"],     // жовтий — ТО/ремонт заплановано попереду
   repair: ["#e0433a", "#a82a22", "#ffffff"],      // червоний — ремонт
-  line_down: ["#ffb74d", "#ff8c00", "#ffffff"],   // сірий  — лінія не працює
+  line_down: ["#f2862b", "#b85f0b", "#ffffff"],   // оранжевий — лінія не працює
 };
 
 function warnIcon(kind, size = 16) {
