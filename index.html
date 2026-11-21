@@ -81,6 +81,13 @@
     border: 1px solid rgba(224, 67, 58, 0.4);
     box-shadow: 0 4px 16px rgba(224, 67, 58, 0.15);
   }
+  .st { display:inline-block; padding:3px 9px; border-radius:10px; font-size:13px; font-weight:600; white-space:nowrap; }
+  .st-work { background:#1f7a3d; color:#fff; }
+  .st-maintenance { background:#c98a00; color:#fff; }
+  .st-repair { background:#c0392b; color:#fff; }
+  .st-line_down { background:#555b66; color:#fff; }
+  .chips { display:flex; gap:8px; overflow-x:auto; padding-bottom:6px; margin-bottom:10px; }
+  .chips .btn { white-space:nowrap; flex:0 0 auto; }
   .history.reverted { opacity: .55; }
   .history.reverted b { text-decoration: line-through; }
   .filters { display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin-bottom:10px; }
@@ -201,6 +208,10 @@ function canUsers() {
   return ["admin", "manager"].includes(ME?.role);
 }
 
+function canEquip() {
+  return ["admin", "manager", "editor"].includes(ME?.role);
+}
+
 function canUndo() {
   return canEdit();
 }
@@ -252,7 +263,9 @@ function askForm(title, fields) {
     const ov = document.createElement("div");
     ov.className = "modal-overlay";
     ov.innerHTML = `<div class="modal"><h2>${esc(title)}</h2>` +
-      fields.map(f => `<label>${esc(f.label)}</label><input id="mf_${esc(f.id)}" type="${esc(f.type || "text")}" value="${esc(f.value || "")}" placeholder="${esc(f.placeholder || "")}" ${f.type === "number" ? 'inputmode="numeric" min="1"' : ""}>`).join("") +
+      fields.map(f => f.type === "select"
+        ? `<label>${esc(f.label)}</label><select id="mf_${esc(f.id)}">${f.options.map(o => `<option value="${esc(o.value)}" ${o.value === f.value ? "selected" : ""}>${esc(o.label)}</option>`).join("")}</select>`
+        : `<label>${esc(f.label)}</label><input id="mf_${esc(f.id)}" type="${esc(f.type || "text")}" value="${esc(f.value || "")}" placeholder="${esc(f.placeholder || "")}" ${f.type === "number" ? 'inputmode="numeric" min="1"' : ""}>`).join("") +
       `<div class="row" style="flex-wrap:nowrap"><button class="btn secondary" style="flex:1" id="mf_cancel">Скасувати</button><button class="btn" style="flex:1" id="mf_ok">ОК</button></div></div>`;
     document.body.appendChild(ov);
     const close = v => { ov.remove(); resolve(v); };
@@ -369,6 +382,7 @@ route("menu", async () => {
     <button class="menu-btn" onclick="go('boxes')">🧰 Бокси</button>
     <button class="menu-btn" onclick="go('scan')">📷 Сканувати QR боксу</button>
     ${canEdit() ? `<button class="menu-btn" onclick="go('reports')">📊 Звіти (Google Таблиці)</button>` : ""}
+    ${canEquip() ? `<button class="menu-btn" onclick="go('equipment')">🏭 Обладнання та лінії</button>` : ""}
     ${canUsers() ? `<button class="menu-btn" onclick="go('audit')">📋 Ревізія</button>` : ""}
     <button class="menu-btn" onclick="go('adminlogs')">📜 Історія операцій</button>
     ${canUsers() ? `<button class="menu-btn admin-btn" onclick="go('admin')">⚙️ Адмінка</button>` : ""}
@@ -1061,6 +1075,170 @@ function renderAuditResult(r) {
     (r.errors.length ? "<h2>Не вдалося виправити</h2>" + r.errors.map(e => `<div class="history" style="color:#e0433a">${esc(e)}</div>`).join("") : "") +
     `<button class="btn" style="width:100%;margin-top:10px" onclick="go('audit')">До списку категорій</button>`
   );
+}
+
+// ================= ОБЛАДНАННЯ ТА ЛІНІЇ (редактор і вище) =================
+const EQ_STATUS = {
+  work: ["Працює", "st-work", "🟢"],
+  maintenance: ["Планове ТО", "st-maintenance", "🟡"],
+  repair: ["Ремонт обладнання", "st-repair", "🔴"],
+  line_down: ["Лінія не працює", "st-line_down", "⚫"],
+};
+let EQ = { lines: [], lineId: null, deleteMode: false };
+
+function stBadge(st) {
+  const s = EQ_STATUS[st] || EQ_STATUS.work;
+  return `<span class="st ${s[1]}">${s[0]}</span>`;
+}
+
+function nowLocalInput() {
+  const d = new Date();
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 16);
+}
+
+function eqRange(from, until) {
+  return `${fmtDate(from)} → ${until ? fmtDate(until) : "без кінця"}`;
+}
+
+route("equipment", async (lineId) => {
+  if (!canEquip()) throw new Error("Недостатньо прав");
+  render(topbar("🏭 Обладнання", "menu") + `<div class="center">Завантаження…</div>`);
+  const data = await api("/api/equipment");
+  EQ.lines = data.lines;
+  if (lineId) EQ.lineId = Number(lineId);
+  if (!EQ.lines.some(l => l.id === EQ.lineId)) EQ.lineId = EQ.lines.length ? EQ.lines[0].id : null;
+  EQ.deleteMode = false;
+  renderEquipment();
+  loadEquipEvents();
+});
+
+function curLine() {
+  return EQ.lines.find(l => l.id === EQ.lineId);
+}
+
+function renderEquipment(typed = "") {
+  const line = curLine();
+  if (!line) return render(topbar("🏭 Обладнання", "menu") + `<div class="empty">Ліній поки немає</div>`);
+  const chips = EQ.lines.map(l => `<button class="btn ${l.id === EQ.lineId ? "" : "secondary"}" onclick="eqPickLine(${l.id})">${(EQ_STATUS[l.health] || EQ_STATUS.work)[2]} ${esc(l.name)}</button>`).join("");
+  const lineInfo = `<div class="card"><div class="card-main"><div class="title">${esc(line.workshop)} · ${esc(line.name)}</div><div class="sub">${line.status !== "work" ? eqRange(line.from, line.until) + (line.note ? " · " + esc(line.note) : "") : `Ремонт: ${Number(line.counts.repair)} · ТО: ${Number(line.counts.maintenance)}`}${line.next ? `<br>Далі: ${esc(EQ_STATUS[line.next.status][0])} з ${fmtDate(line.next.from)}` : ""}</div></div>${stBadge(line.status)}</div>
+    <div class="row" style="margin-bottom:10px"><button class="btn" style="width:100%" onclick="eqMark(null)">⚙️ Позначити всю лінію</button></div>`;
+  const items = line.equipment.map(e => {
+    const detail = (e.status !== "work" ? eqRange(e.from, e.until) + (e.source === "line" ? " (через лінію)" : "") + (e.note ? " · " + esc(e.note) : "") : "") +
+      (e.next ? `${e.status !== "work" ? "<br>" : ""}Далі: ${esc(EQ_STATUS[e.next.status][0])} з ${fmtDate(e.next.from)}` : "");
+    return `<div class="card click ${EQ.deleteMode ? "deleting" : ""}" onclick="eqClick(${Number(e.id)})"><div class="card-main"><div class="title">${esc(e.name)}</div>${detail ? `<div class="sub">${detail}</div>` : ""}</div>${EQ.deleteMode ? "<span>✕</span>" : stBadge(e.status)}</div>`;
+  }).join("");
+  render(
+    topbar("🏭 Обладнання", "menu") +
+    `<div class="chips">${chips}</div>` + lineInfo +
+    (EQ.deleteMode ? `<p class="hint" style="color:#e0433a">Режим видалення: натисни на обладнання, яке треба прибрати зі списку.</p>` : `<p class="hint">Натисни на обладнання, щоб позначити ТО, ремонт чи повернення в роботу.</p>`) +
+    (items || `<div class="empty">На цій лінії обладнання немає</div>`) +
+    `<div class="form"><h2>Додати обладнання</h2>${formField("Назва обладнання", "eqname", "text", typed)}<div class="row"><button class="btn" onclick="eqAdd()">＋ Додати обладнання</button><button class="btn danger" onclick="eqToggleDelete()">${EQ.deleteMode ? "Готово" : "－ Видалити обладнання"}</button></div></div>` +
+    `<h2>Заплановані та історія</h2><div id="eqevents"><div class="center">Завантаження…</div></div>`
+  );
+}
+
+function eqPickLine(id) {
+  EQ.lineId = id;
+  EQ.deleteMode = false;
+  renderEquipment();
+  loadEquipEvents();
+}
+
+function eqToggleDelete() {
+  const typed = document.getElementById("eqname")?.value || "";
+  EQ.deleteMode = !EQ.deleteMode;
+  renderEquipment(typed);
+  loadEquipEvents();
+}
+
+function eqClick(equipId) {
+  if (EQ.deleteMode) return eqDelete(equipId);
+  eqMark(equipId);
+}
+
+async function eqMark(equipId) {
+  const line = curLine();
+  if (!line) return;
+  const eq = equipId ? line.equipment.find(e => e.id === equipId) : null;
+  const options = [["work", "Працює"], ["maintenance", "Планове ТО"], ["repair", "Ремонт обладнання"]];
+  if (!equipId) options.push(["line_down", "Лінія не працює"]);
+  const res = await askForm(eq ? eq.name : `${line.name} — уся лінія`, [
+    { id: "status", label: "Статус", type: "select", value: "maintenance", options: options.map(([value, label]) => ({ value, label })) },
+    { id: "start", label: "Початок", type: "datetime-local", value: nowLocalInput() },
+    { id: "end", label: "Закінчення (необов’язково)", type: "datetime-local", value: "" },
+    { id: "note", label: "Примітка (необов’язково)", value: "", placeholder: "напр. заміна підшипника" },
+  ]);
+  if (!res) return;
+  try {
+    await api("/api/equipment/events", { method: "POST", body: {
+      line_id: line.id, equipment_id: equipId || null, status: res.status,
+      start: res.start, end: res.end, note: res.note.trim(),
+    } });
+    toast("Статус збережено");
+    go("equipment", line.id);
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+async function eqAdd() {
+  const name = document.getElementById("eqname").value.trim();
+  if (!name) return toast("Введи назву обладнання");
+  try {
+    await api("/api/equipment", { method: "POST", body: { line_id: EQ.lineId, name } });
+    go("equipment", EQ.lineId);
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+async function eqDelete(equipId) {
+  const line = curLine();
+  const eq = line && line.equipment.find(e => e.id === equipId);
+  if (!eq) return;
+  if (!(await confirmDlg(`Видалити «${eq.name}» зі списку? Його історія статусів теж видалиться.`))) return;
+  try {
+    await api("/api/equipment/" + equipId, { method: "DELETE" });
+    line.equipment = line.equipment.filter(e => e.id !== equipId);
+    toast("Обладнання видалено");
+    renderEquipment();
+    loadEquipEvents();
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+async function loadEquipEvents() {
+  const box = document.getElementById("eqevents");
+  if (!box || !EQ.lineId) return;
+  try {
+    const rows = await api("/api/equipment/events?line_id=" + EQ.lineId);
+    const stateLabel = { planned: "🕒 заплановано", active: "▶️ триває", finished: "✔️ завершено" };
+    box.innerHTML = rows.length ? rows.map(r => `<div class="history ${r.state === "finished" ? "reverted" : ""}"><b>${esc(EQ_STATUS[r.status][0])}</b> · ${esc(r.target)} · ${stateLabel[r.state]}<br>${eqRange(r.from, r.until)}${r.note ? "<br>📝 " + esc(r.note) : ""}<br>👤 ${esc(r.username)}<br>${r.state === "active" ? `<button class="btn secondary" style="margin-top:6px" onclick="eqEndEvent(${Number(r.id)})">⏹ Завершити зараз</button> ` : ""}<button class="btn secondary" style="margin-top:6px" onclick="eqDeleteEvent(${Number(r.id)})">🗑 Видалити запис</button></div>`).join("") : `<div class="empty">Записів поки немає</div>`;
+  } catch (e) {
+    box.innerHTML = `<div class="empty">Не вдалося завантажити: ${esc(e.message)}</div>`;
+  }
+}
+
+async function eqEndEvent(id) {
+  try {
+    await api(`/api/equipment/events/${id}/end`, { method: "POST" });
+    toast("Завершено");
+    go("equipment", EQ.lineId);
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+async function eqDeleteEvent(id) {
+  if (!(await confirmDlg("Видалити цей запис зі статусів?"))) return;
+  try {
+    await api("/api/equipment/events/" + id, { method: "DELETE" });
+    go("equipment", EQ.lineId);
+  } catch (e) {
+    toast(e.message);
+  }
 }
 
 async function boot() {
