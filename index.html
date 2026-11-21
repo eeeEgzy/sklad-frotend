@@ -1139,7 +1139,7 @@ function renderEquipment(typed = "") {
   const lineChips = inWs.map(l => `<button class="btn ${l.id === EQ.lineId ? "" : "secondary"}" onclick="eqPickLine(${Number(l.id)})">${EQ_STATUS[l.health][2]} ${esc(l.name)}</button>`).join("");
 
   const addLineForm = edit
-    ? `<div class="form"><h2>Додати лінію в «${esc(EQ.workshop)}»</h2>${formField("Назва лінії", "linename", "text", "")}<button class="btn" onclick="eqAddLine()">＋ Додати лінію</button></div>`
+    ? `<div class="form"><h2>Лінії цеху «${esc(EQ.workshop)}»</h2>${formField("Назва нової лінії", "linename", "text", "")}<div class="row"><button class="btn" onclick="eqAddLine()">＋ Додати лінію</button>${line ? `<button class="btn danger" onclick="eqDeleteLine()">－ Видалити «${esc(line.name)}»</button>` : ""}</div></div>`
     : "";
 
   let body = "";
@@ -1147,7 +1147,7 @@ function renderEquipment(typed = "") {
     body = `<div class="empty">У цьому цеху ще немає ліній</div>` + addLineForm;
   } else {
     const lineInfo = `<div class="card"><div class="card-main"><div class="title">${esc(line.workshop)} · ${esc(line.name)}</div><div class="sub">${line.status !== "work" ? eqRange(line.from, line.until) + (line.note ? " · " + esc(line.note) : "") : `Ремонт: ${Number(line.counts.repair)} · ТО: ${Number(line.counts.maintenance)}`}${line.next ? `<br>Далі: ${esc(EQ_STATUS[line.next.status][0])} з ${fmtDate(line.next.from)}` : ""}</div></div>${stBadge(line.status)}</div>` +
-      (edit ? `<div class="row" style="margin-bottom:10px"><button class="btn" style="flex:1" onclick="eqMark(null)">⚙️ Позначити всю лінію</button><button class="btn danger" onclick="eqDeleteLine()">🗑 Лінію</button></div>` : "");
+      (edit ? `<div class="row" style="margin-bottom:10px"><button class="btn" style="width:100%" onclick="eqMark(null)">⚙️ Позначити всю лінію</button></div>` : "");
     const items = line.equipment.map(e => {
       const detail = (e.status !== "work" ? eqRange(e.from, e.until) + (e.source === "line" ? " (через лінію)" : "") + (e.note ? " · " + esc(e.note) : "") : "") +
         (e.next ? `${e.status !== "work" ? "<br>" : ""}Далі: ${esc(EQ_STATUS[e.next.status][0])} з ${fmtDate(e.next.from)}` : "");
