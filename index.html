@@ -398,11 +398,60 @@ async function go(name, ...args) {
 
 // ================= МАРШРУТИ =================
 
+// ================= ПРОФІЛЬ (імʼя та логін, заповнюється один раз) =================
+function renderProfile(gate) {
+  const done = ME && ME.profile_done;
+  render(
+    topbar(gate ? "👤 Заповни профіль" : "👤 Мій профіль", gate ? null : "menu") +
+    `<p class="hint">${gate
+      ? "Перед входом вкажи своє імʼя та логін. Це робиться один раз: дані збережуться, поки ти сам не вийдеш з профілю."
+      : "Твої дані збережені. Адміністратор бачить їх, якщо ти забудеш логін."}</p>
+     <div class="form">
+       ${formField("Імʼя та прізвище", "pfname", "text", (ME && ME.full_name) || "")}
+       ${formField("Логін для входу", "pflogin", "text", (ME && ME.login) || "")}
+       <p class="hint">⚠️ Пароль тут не вказуй: зберігається лише імʼя та логін.</p>
+       <button class="btn" style="width:100%" onclick="saveProfile(${gate ? "true" : "false"})">${gate ? "Зберегти й увійти" : "Зберегти"}</button>
+       ${!gate && done ? `<button class="btn danger" style="width:100%;margin-top:10px" onclick="profileLogout()">Вийти з профілю</button>` : ""}
+     </div>`
+  );
+}
+
+route("profile", async () => {
+  renderProfile(false);
+});
+
+async function saveProfile(gate) {
+  const full_name = document.getElementById("pfname").value.trim();
+  const login = document.getElementById("pflogin").value.trim();
+  if (full_name.length < 2) return toast("Вкажи імʼя та прізвище");
+  if (login.length < 2) return toast("Вкажи логін");
+  try {
+    await api("/api/profile", { method: "POST", body: { full_name, login } });
+    ME = await api("/api/me");
+    toast("Профіль збережено");
+    if (gate) return boot();
+    go("menu");
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+async function profileLogout() {
+  if (!(await confirmDlg("Вийти з профілю? Імʼя та логін буде видалено, при наступному вході їх потрібно вписати знову."))) return;
+  try {
+    await api("/api/profile/logout", { method: "POST", body: {} });
+    ME = await api("/api/me");
+    renderProfile(true);
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
 route("menu", async () => {
   const roleName = ROLE_LABELS[ME?.role] || "Працівник";
   render(`
     ${topbar("📦 Склад", null)}
-    ${ME ? `<div style="display:flex;align-items:center;gap:12px;margin:4px 0 16px">${avatar(ME.user_id, ME.username, 48)}<div><div style="font-weight:600">${esc(ME.username)}</div><div class="hint">${roleName}</div></div></div>` : ""}
+    ${ME ? `<div style="display:flex;align-items:center;gap:12px;margin:4px 0 16px">${avatar(ME.user_id, ME.username, 48)}<div><div style="font-weight:600">${esc(ME.full_name || ME.username)}</div><div class="hint">${roleName}${ME.login ? " · логін: " + esc(ME.login) : ""}</div></div></div>` : ""}
     <button class="menu-btn" onclick="go('categories')">📦 Товари та категорії</button>
     <button class="menu-btn" onclick="go('search')">🔍 Пошук товару</button>
     <button class="menu-btn" onclick="go('deficit')">⚠️ Дефіцит і малі залишки</button>
@@ -412,6 +461,7 @@ route("menu", async () => {
     <button class="menu-btn" onclick="go('equipment')">🏭 Обладнання та лінії</button>
     ${canUsers() ? `<button class="menu-btn" onclick="go('audit')">📋 Ревізія</button>` : ""}
     <button class="menu-btn" onclick="go('adminlogs')">📜 Історія операцій</button>
+    <button class="menu-btn" onclick="go('profile')">👤 Мій профіль</button>
     ${canUsers() ? `<button class="menu-btn admin-btn" onclick="go('admin')">⚙️ Адмінка</button>` : ""}
     ${ME && ME.status === "pending" ? `<p class="hint">Ваш акаунт очікує підтвердження адміністратора.</p>` : ""}
   `);
@@ -908,8 +958,8 @@ route("admin", async () => {
         <div class="card">
           ${avatar(u.user_id, u.username, 40)}
           <div class="card-main">
-            <div class="title">${esc(u.username)}</div>
-            <div class="sub">ID: ${u.user_id}</div>
+            <div class="title">${esc(u.full_name || u.username)}</div>
+            <div class="sub">@${esc(u.username)} · логін: ${esc(u.login || "—")}<br>ID: ${u.user_id}</div>
           </div>
           <div class="row">
             <button class="btn" onclick="approveUser(${u.user_id})">✓</button>
@@ -925,8 +975,8 @@ route("admin", async () => {
       <div class="card" style="align-items:flex-start">
         ${avatar(u.user_id, u.username, 44)}
         <div class="card-main">
-          <div class="title">${esc(u.username)}</div>
-          <div class="sub">ID: ${u.user_id} · ${esc(ROLE_LABELS[u.role] || u.role)}</div>
+          <div class="title">${esc(u.full_name || u.username)}</div>
+          <div class="sub">@${esc(u.username)} · логін: ${esc(u.login || "—")}<br>ID: ${u.user_id} · ${esc(ROLE_LABELS[u.role] || u.role)}</div>
           ${(mine || locked) ? "" : `
           <div class="row" style="margin-top:8px">
             <select style="width:auto;margin:0" onchange="setUserRole(${u.user_id}, this.value)">
@@ -1261,7 +1311,7 @@ function renderEquipment(typed = "") {
 
   render(
     topbar("🏭 Обладнання", "menu") +
-    `<div class="form"><div class="row" style="flex-wrap:nowrap"><input type="search" id="partq" placeholder="🔍 Знайти деталь: номер, розмір, назва" style="flex:1" onkeydown="if(event.key==='Enter')partSearch()"><button class="btn" onclick="partSearch()">Знайти</button></div><div id="partresults"></div></div>` +
+    `<div class="form" style="margin-bottom:16px"><div class="row" style="flex-wrap:nowrap"><input type="search" id="partq" placeholder="🔍 Знайти деталь: номер, розмір, назва" style="flex:1" onkeydown="if(event.key==='Enter')partSearch()"><button class="btn" onclick="partSearch()">Знайти</button></div><div id="partresults"></div></div>` +
     `<div class="chips">${wsChips}</div>` +
     (lineChips ? `<div class="chips">${lineChips}</div>` : "") +
     warnLegend() +
@@ -1549,6 +1599,10 @@ async function boot() {
     ME = await api("/api/me");
     if (ME.status === "removed") {
       render(topbar("Доступ закрито", null) + `<div class="center">Адміністратор закрив вам доступ до складу.</div>`);
+      return;
+    }
+    if (!ME.profile_done) {
+      renderProfile(true);
       return;
     }
     if (ME.status === "pending") {
