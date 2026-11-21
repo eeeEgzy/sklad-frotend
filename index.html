@@ -118,6 +118,7 @@
   }
   .form h2 { margin-top: 0; }
   label { display: block; font-size: 13px; color: var(--hint); margin-bottom: 4px; }
+  textarea { width:100%; box-sizing:border-box; min-height:90px; font:inherit; border-radius:12px; padding:10px; border:1px solid #444; background:#000; color:var(--text); }
   input, select {
     width: 100%; padding: 10px 12px; border-radius: 10px;
     border: 1px solid var(--hint); background: var(--bg); color: var(--text);
@@ -265,6 +266,8 @@ function askForm(title, fields) {
     ov.innerHTML = `<div class="modal"><h2>${esc(title)}</h2>` +
       fields.map(f => f.type === "select"
         ? `<label>${esc(f.label)}</label><select id="mf_${esc(f.id)}">${f.options.map(o => `<option value="${esc(o.value)}" ${o.value === f.value ? "selected" : ""}>${esc(o.label)}</option>`).join("")}</select>`
+        : f.type === "textarea"
+        ? `<label>${esc(f.label)}</label><textarea id="mf_${esc(f.id)}" placeholder="${esc(f.placeholder || "")}">${esc(f.value || "")}</textarea>`
         : `<label>${esc(f.label)}</label><input id="mf_${esc(f.id)}" type="${esc(f.type || "text")}" value="${esc(f.value || "")}" placeholder="${esc(f.placeholder || "")}" ${f.type === "number" ? 'inputmode="numeric" min="1"' : ""}>`).join("") +
       `<div class="row" style="flex-wrap:nowrap"><button class="btn secondary" style="flex:1" id="mf_cancel">Скасувати</button><button class="btn" style="flex:1" id="mf_ok">ОК</button></div></div>`;
     document.body.appendChild(ov);
@@ -1151,7 +1154,7 @@ function renderEquipment(typed = "") {
     const items = line.equipment.map(e => {
       const detail = (e.status !== "work" ? eqRange(e.from, e.until) + (e.source === "line" ? " (через лінію)" : "") + (e.note ? " · " + esc(e.note) : "") : "") +
         (e.next ? `${e.status !== "work" ? "<br>" : ""}Далі: ${esc(EQ_STATUS[e.next.status][0])} з ${fmtDate(e.next.from)}` : "");
-      return `<div class="card ${edit ? "click" : ""} ${EQ.deleteMode ? "deleting" : ""}" ${edit ? `onclick="eqClick(${Number(e.id)})"` : ""}><div class="card-main"><div class="title">${esc(e.name)}</div>${detail ? `<div class="sub">${detail}</div>` : ""}</div>${EQ.deleteMode ? "<span>✕</span>" : stBadge(e.status)}</div>`;
+      return `<div class="card ${edit ? "click" : ""} ${EQ.deleteMode ? "deleting" : ""}" ${edit ? `onclick="eqClick(${Number(e.id)})"` : ""}><div class="card-main"><div class="title">${esc(e.name)}</div>${detail ? `<div class="sub">${detail}</div>` : ""}${EQ.deleteMode ? "" : `<div style="margin-top:6px"><button class="btn secondary" style="padding:6px 10px;font-size:14px" onclick="event.stopPropagation(); go('parts', ${Number(e.id)})">🔧 Деталі (${Number(e.parts || 0)})</button></div>`}</div>${EQ.deleteMode ? "<span>✕</span>" : stBadge(e.status)}</div>`;
     }).join("");
     body = lineInfo +
       (edit ? (EQ.deleteMode ? `<p class="hint" style="color:#e0433a">Режим видалення: натисни на обладнання, яке треба прибрати зі списку.</p>` : `<p class="hint">Натисни на обладнання, щоб позначити ТО, ремонт чи повернення в роботу.</p>`) : "") +
@@ -1163,6 +1166,7 @@ function renderEquipment(typed = "") {
 
   render(
     topbar("🏭 Обладнання", "menu") +
+    `<div class="form"><div class="row" style="flex-wrap:nowrap"><input type="search" id="partq" placeholder="🔍 Знайти деталь: номер, розмір, назва" style="flex:1" onkeydown="if(event.key==='Enter')partSearch()"><button class="btn" onclick="partSearch()">Знайти</button></div><div id="partresults"></div></div>` +
     `<div class="chips">${wsChips}</div>` +
     (lineChips ? `<div class="chips">${lineChips}</div>` : "") +
     body
@@ -1307,6 +1311,135 @@ async function eqDeleteEvent(id) {
   try {
     await api("/api/equipment/events/" + id, { method: "DELETE" });
     go("equipment", EQ.lineId);
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+async function partSearch() {
+  const q = (document.getElementById("partq")?.value || "").trim();
+  const box = document.getElementById("partresults");
+  if (!box) return;
+  if (q.length < 2) { box.innerHTML = `<p class="hint">Введи хоча б 2 символи</p>`; return; }
+  box.innerHTML = `<div class="center">Шукаю…</div>`;
+  try {
+    const rows = await api("/api/equipment/parts/search?q=" + enc(q));
+    box.innerHTML = rows.length
+      ? rows.map(r => `<div class="card click" onclick="go('parts', ${Number(r.equipment_id)})"><div class="card-main"><div class="title">${esc(r.equipment)}</div><div class="sub">${esc(r.workshop)} · ${esc(r.line)}<br><b>${esc(r.part)}:</b> <span style="white-space:pre-wrap">${esc(r.details)}</span></div></div><span>›</span></div>`).join("")
+      : `<p class="hint">Нічого не знайдено серед заповнених деталей.</p>`;
+  } catch (e) {
+    box.innerHTML = `<p class="hint">Помилка пошуку: ${esc(e.message)}</p>`;
+  }
+}
+
+// ================= ДЕТАЛІ ОБЛАДНАННЯ (бачать усі, змінює зав складу / адмін) =================
+let PARTS = { eqId: null, data: null, deleteMode: false };
+
+route("parts", async (eqId) => {
+  PARTS.eqId = Number(eqId);
+  PARTS.deleteMode = false;
+  render(topbar("🔧 Деталі", "equipment") + `<div class="center">Завантаження…</div>`);
+  PARTS.data = await api(`/api/equipment/${PARTS.eqId}/parts`);
+  renderParts();
+});
+
+function renderParts(typedName = "", typedDetails = "") {
+  const d = PARTS.data;
+  const edit = canUsers();
+  const cards = d.parts.map((p, i) => {
+    const body = p.details
+      ? `<div class="sub" style="white-space:pre-wrap">${esc(p.details)}</div>`
+      : `<div class="sub" style="opacity:.55">не заповнено${p.hint ? " · " + esc(p.hint) : ""}</div>`;
+    return `<div class="card ${edit ? "click" : ""} ${PARTS.deleteMode ? "deleting" : ""}" ${edit ? `onclick="partClick(${i})"` : ""}><div class="card-main"><div class="title">${esc(p.name)}</div>${body}</div>${PARTS.deleteMode ? "<span>✕</span>" : ""}</div>`;
+  }).join("");
+  const form = edit
+    ? `<div class="form"><h2>Додати деталь</h2>
+        <label for="pname">Назва</label><input id="pname" list="partnames" value="${esc(typedName)}" placeholder="напр. Підшипники">
+        <datalist id="partnames">${d.suggestions.map(n => `<option value="${esc(n)}">`).join("")}</datalist>
+        <label for="pdetails">Розмір / номер / опис</label><textarea id="pdetails">${esc(typedDetails)}</textarea>
+        <div class="row"><button class="btn" onclick="partAdd()">＋ Додати деталь</button><button class="btn danger" onclick="partToggleDelete()">${PARTS.deleteMode ? "Готово" : "－ Видалити деталь"}</button></div>
+        <div class="row" style="margin-top:8px"><button class="btn secondary" onclick="partTemplate()">📋 Стандартний набір</button><button class="btn secondary" onclick="partClearEmpty()">🧹 Прибрати порожні</button></div>
+      </div>`
+    : `<p class="hint">Змінювати деталі може зав складу.</p>`;
+  render(
+    topbar("🔧 " + d.equipment.name, "equipment") +
+    `<p class="hint">${esc(d.equipment.workshop)} · ${esc(d.equipment.line)}</p>` +
+    (edit && PARTS.deleteMode ? `<p class="hint" style="color:#e0433a">Режим видалення: натисни на деталь, яку треба прибрати.</p>` : (edit ? `<p class="hint">Натисни на деталь, щоб вписати або змінити розмір чи номер.</p>` : "")) +
+    (cards || `<div class="empty">Деталей поки немає</div>`) +
+    form
+  );
+}
+
+function partClick(i) {
+  const p = PARTS.data.parts[i];
+  if (!p || !canUsers()) return;
+  if (PARTS.deleteMode) return partDelete(p);
+  partEdit(p);
+}
+
+async function partEdit(p) {
+  const res = await askForm("Деталь", [
+    { id: "name", label: "Назва", value: p.name },
+    { id: "details", label: "Розмір / номер / опис", type: "textarea", value: p.details, placeholder: p.hint || "" },
+  ]);
+  if (!res) return;
+  if (!res.name.trim()) return toast("Вкажи назву деталі");
+  try {
+    await api("/api/equipment/parts/" + p.id, { method: "POST", body: { name: res.name.trim(), details: res.details.trim() } });
+    toast("Збережено");
+    go("parts", PARTS.eqId);
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+async function partAdd() {
+  const name = document.getElementById("pname").value.trim();
+  const details = document.getElementById("pdetails").value.trim();
+  if (!name) return toast("Вкажи назву деталі");
+  try {
+    await api(`/api/equipment/${PARTS.eqId}/parts`, { method: "POST", body: { name, details } });
+    go("parts", PARTS.eqId);
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+function partToggleDelete() {
+  const n = document.getElementById("pname")?.value || "";
+  const d = document.getElementById("pdetails")?.value || "";
+  PARTS.deleteMode = !PARTS.deleteMode;
+  renderParts(n, d);
+}
+
+async function partDelete(p) {
+  if (!(await confirmDlg(`Видалити деталь «${p.name}»?`))) return;
+  try {
+    await api("/api/equipment/parts/" + p.id, { method: "DELETE" });
+    PARTS.data.parts = PARTS.data.parts.filter(x => x.id !== p.id);
+    toast("Деталь видалено");
+    renderParts();
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+async function partTemplate() {
+  try {
+    const r = await api(`/api/equipment/${PARTS.eqId}/parts/template`, { method: "POST" });
+    toast(r.added ? `Додано деталей: ${Number(r.added)}` : "Усі деталі набору вже є");
+    go("parts", PARTS.eqId);
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+async function partClearEmpty() {
+  if (!(await confirmDlg("Видалити всі деталі, де нічого не вписано?"))) return;
+  try {
+    const r = await api(`/api/equipment/${PARTS.eqId}/parts/clear-empty`, { method: "POST" });
+    toast(`Прибрано: ${Number(r.removed)}`);
+    go("parts", PARTS.eqId);
   } catch (e) {
     toast(e.message);
   }
