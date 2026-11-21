@@ -3,17 +3,22 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="color-scheme" content="light" />
+<meta name="theme-color" content="#ffffff" />
 <title>Склад</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
+  /* Світла тема примусово: чорний текст на білому, незалежно від теми Telegram/браузера */
   :root {
-    --bg: var(--tg-theme-bg-color, #ffffff);
-    --text: var(--tg-theme-text-color, #111111);
-    --hint: var(--tg-theme-hint-color, #999999);
-    --link: var(--tg-theme-link-color, #2481cc);
-    --button: var(--tg-theme-button-color, #2481cc);
-    --button-text: var(--tg-theme-button-text-color, #ffffff);
-    --secondary-bg: var(--tg-theme-secondary-bg-color, #f0f0f0);
+    color-scheme: light;
+    --bg: #ffffff;
+    --text: #111111;
+    --hint: #6b6b73;
+    --link: #111111;
+    --button: #111111;
+    --button-text: #ffffff;
+    --secondary-bg: #f2f2f5;
+    --border: #c8c8d0;
   }
   * { box-sizing: border-box; }
   html, body {
@@ -28,6 +33,7 @@
   h2 { font-size: 16px; margin: 16px 0 8px; }
   .card {
     background: var(--secondary-bg);
+    border: 1px solid var(--border);
     border-radius: 12px;
     padding: 12px 14px;
     margin-bottom: 8px;
@@ -82,10 +88,13 @@
     box-shadow: 0 4px 16px rgba(224, 67, 58, 0.15);
   }
   .st { display:inline-block; padding:3px 9px; border-radius:10px; font-size:13px; font-weight:600; white-space:nowrap; }
-  .st-work { background:#1f7a3d; color:#fff; }
-  .st-maintenance { background:#c98a00; color:#fff; }
+  .st-work { background:#ffffff; color:#111; border:1px solid #111; }
+  .st-maintenance { background:#2f6fed; color:#fff; }
   .st-repair { background:#c0392b; color:#fff; }
-  .st-line_down { background:#555b66; color:#fff; }
+  .st-line_down { background:#8b8f98; color:#fff; }
+  .st-planned { background:#f5c518; color:#111; }
+  .warn-legend { display:flex; flex-wrap:wrap; gap:6px 14px; font-size:12px; color:var(--hint); margin:0 0 12px; }
+  .warn-legend span { display:inline-flex; align-items:center; gap:4px; }
   .chips { display:flex; gap:8px; overflow-x:auto; padding-bottom:6px; margin-bottom:10px; }
   .chips .btn { white-space:nowrap; flex:0 0 auto; }
   .history.reverted { opacity: .55; }
@@ -94,6 +103,8 @@
   .filters .full { grid-column: 1 / -1; }
   .card.deleting { outline: 2px solid #e0433a; color: #e0433a; }
   .btn:active { opacity: .85; }
+  input::placeholder, textarea::placeholder { color: #9a9aa3; -webkit-text-fill-color: #9a9aa3; }
+  select option { background: #ffffff; color: #111111; }
   .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 50; }
   .modal { background: var(--bg); color: var(--text); border-radius: 14px; padding: 16px; width: 100%; max-width: 420px; }
   .modal h2 { margin-top: 0; }
@@ -109,19 +120,21 @@
     border: none; border-radius: 10px;
     padding: 10px 14px; font-size: 14px; cursor: pointer;
   }
-  .btn.secondary { background: var(--secondary-bg); color: var(--text); }
+  .btn.secondary { background: var(--secondary-bg); color: var(--text); border: 1px solid var(--border); }
   .btn.danger { background: #e0433a; color: #fff; }
   .btn:disabled { opacity: .5; }
   .form {
     background: var(--secondary-bg);
+    border: 1px solid var(--border);
     padding: 12px 14px; border-radius: 12px; margin-top: 14px;
   }
   .form h2 { margin-top: 0; }
   label { display: block; font-size: 13px; color: var(--hint); margin-bottom: 4px; }
-  textarea { width:100%; box-sizing:border-box; min-height:90px; font:inherit; border-radius:12px; padding:10px; border:1px solid #444; background:#000; color:var(--text); }
+  textarea { width:100%; box-sizing:border-box; min-height:90px; font:inherit; border-radius:10px; padding:10px 12px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-size:15px; margin-bottom:10px; }
   input, select {
     width: 100%; padding: 10px 12px; border-radius: 10px;
-    border: 1px solid var(--hint); background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); background: var(--bg); color: var(--text);
+    -webkit-text-fill-color: var(--text); opacity: 1;
     font-size: 15px; margin-bottom: 10px;
   }
   .topbar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
@@ -129,7 +142,7 @@
   .hint { color: var(--hint); font-size: 13px; margin: 6px 0 12px; }
   .history, .history-item {
     font-size: 13px; color: var(--text);
-    background: var(--secondary-bg); border-radius: 10px;
+    background: var(--secondary-bg); border: 1px solid var(--border); border-radius: 10px;
     padding: 10px 12px; margin-bottom: 8px; line-height: 1.4;
   }
   .center { text-align: center; padding: 40px 0; color: var(--hint); }
@@ -149,6 +162,13 @@ const tg = window.Telegram ? window.Telegram.WebApp : null;
 if (tg) {
   tg.ready();
   tg.expand();
+  try {
+    if (tg.isVersionAtLeast && tg.isVersionAtLeast("6.9")) {
+      tg.setHeaderColor("#ffffff");
+      tg.setBackgroundColor("#ffffff");
+      if (tg.setBottomBarColor) tg.setBottomBarColor("#ffffff");
+    }
+  } catch (_e) {}
 }
 
 const API_BASE = window.SKLAD_API_BASE || "https://Valetnyn.pythonanywhere.com";
@@ -1087,7 +1107,31 @@ const EQ_STATUS = {
   repair: ["Ремонт обладнання", "st-repair", "🔴"],
   line_down: ["Лінія не працює", "st-line_down", "⚫"],
 };
-const EQ_RANK = { work: 0, maintenance: 1, repair: 2, line_down: 3 };
+const EQ_RANK = { work: 0, planned: 1, maintenance: 2, repair: 3, line_down: 4 };
+// колір трикутника: [заливка, обводка, знак «!»]
+const WARN_COLORS = {
+  work: ["#ffffff", "#111111", "#111111"],        // білий  — працює
+  maintenance: ["#2f6fed", "#1d4fb8", "#ffffff"], // синій  — планове ТО
+  planned: ["#f5c518", "#b38f00", "#111111"],     // жовтий — ТО/ремонт заплановано попереду
+  repair: ["#e0433a", "#a82a22", "#ffffff"],      // червоний — ремонт
+  line_down: ["#8b8f98", "#5a5e66", "#ffffff"],   // сірий  — лінія не працює
+};
+
+function warnIcon(kind, size = 16) {
+  const c = WARN_COLORS[kind] || WARN_COLORS.work;
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" style="vertical-align:-3px" aria-hidden="true"><path d="M12 3 L22.5 21 H1.5 Z" fill="${c[0]}" stroke="${c[1]}" stroke-width="1.6" stroke-linejoin="round"/><rect x="11" y="9" width="2" height="6.5" rx="1" fill="${c[2]}"/><circle cx="12" cy="18" r="1.2" fill="${c[2]}"/></svg>`;
+}
+
+// що показувати біля лінії: поточний стан, а якщо все працює, але щось заплановано — жовтий
+function healthKind(l) {
+  if (l.health !== "work") return l.health;
+  return (l.next || l.equipment.some(e => e.next)) ? "planned" : "work";
+}
+
+function warnLegend() {
+  const items = [["work", "працює"], ["maintenance", "планове ТО"], ["planned", "заплановано"], ["repair", "ремонт"], ["line_down", "лінія не працює"]];
+  return `<div class="warn-legend">${items.map(([k, t]) => `<span>${warnIcon(k, 14)} ${t}</span>`).join("")}</div>`;
+}
 let EQ = { workshops: [], workshop: "", lines: [], lineId: null, deleteMode: false };
 
 function stBadge(st) {
@@ -1110,7 +1154,7 @@ function curLine() {
 }
 
 function worstHealth(lines) {
-  return lines.reduce((w, l) => (EQ_RANK[l.health] > EQ_RANK[w] ? l.health : w), "work");
+  return lines.reduce((w, l) => (EQ_RANK[healthKind(l)] > EQ_RANK[w] ? healthKind(l) : w), "work");
 }
 
 route("equipment", async (lineId) => {
@@ -1137,9 +1181,9 @@ function renderEquipment(typed = "") {
 
   const wsChips = EQ.workshops.map((w, i) => {
     const h = worstHealth(EQ.lines.filter(l => l.workshop === w));
-    return `<button class="btn ${w === EQ.workshop ? "" : "secondary"}" onclick="eqPickWorkshop(${i})">${EQ_STATUS[h][2]} ${esc(w)}</button>`;
+    return `<button class="btn ${w === EQ.workshop ? "" : "secondary"}" onclick="eqPickWorkshop(${i})">${warnIcon(h)} ${esc(w)}</button>`;
   }).join("");
-  const lineChips = inWs.map(l => `<button class="btn ${l.id === EQ.lineId ? "" : "secondary"}" onclick="eqPickLine(${Number(l.id)})">${EQ_STATUS[l.health][2]} ${esc(l.name)}</button>`).join("");
+  const lineChips = inWs.map(l => `<button class="btn ${l.id === EQ.lineId ? "" : "secondary"}" onclick="eqPickLine(${Number(l.id)})">${warnIcon(healthKind(l))} ${esc(l.name)}</button>`).join("");
 
   const addLineForm = edit
     ? `<div class="form"><h2>Лінії цеху «${esc(EQ.workshop)}»</h2>${formField("Назва нової лінії", "linename", "text", "")}<div class="row"><button class="btn" onclick="eqAddLine()">＋ Додати лінію</button>${line ? `<button class="btn danger" onclick="eqDeleteLine()">－ Видалити «${esc(line.name)}»</button>` : ""}</div></div>`
@@ -1169,6 +1213,7 @@ function renderEquipment(typed = "") {
     `<div class="form"><div class="row" style="flex-wrap:nowrap"><input type="search" id="partq" placeholder="🔍 Знайти деталь: номер, розмір, назва" style="flex:1" onkeydown="if(event.key==='Enter')partSearch()"><button class="btn" onclick="partSearch()">Знайти</button></div><div id="partresults"></div></div>` +
     `<div class="chips">${wsChips}</div>` +
     (lineChips ? `<div class="chips">${lineChips}</div>` : "") +
+    warnLegend() +
     body
   );
 }
