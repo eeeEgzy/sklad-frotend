@@ -66,16 +66,15 @@
     gap: 16px;
     width: 100%;
     text-align: left;
-    background: #1c1c1e;
-    color: #ffffff;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 16px;
+    background: var(--secondary-bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 14px;
     padding: 20px 20px;
     margin-bottom: 12px;
     font-size: 17px;
     font-weight: 600;
     cursor: pointer;
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
     transition: all 0.2s ease;
   }
   .menu-btn:active {
@@ -83,9 +82,8 @@
     opacity: 0.9;
   }
   .menu-btn.admin-btn {
-    background: linear-gradient(135deg, #1c1c1e, #2c1f1f);
-    border: 1px solid rgba(224, 67, 58, 0.4);
-    box-shadow: 0 4px 16px rgba(224, 67, 58, 0.15);
+    background: #fdf1f0;
+    border: 1px solid rgba(224, 67, 58, 0.5);
   }
   .st { display:inline-block; padding:3px 9px; border-radius:10px; font-size:13px; font-weight:600; white-space:nowrap; }
   .st-work { background:#1f7a3d; color:#fff; }
@@ -1128,8 +1126,13 @@ function healthKind(l) {
   return (l.next || l.equipment.some(e => e.next)) ? "planned" : "work";
 }
 
+// біля цеху/лінії значок лише коли є що показати; якщо все працює — без значка
+function chipIcon(kind) {
+  return kind === "work" ? "" : warnIcon(kind) + " ";
+}
+
 function warnLegend() {
-  const items = [["work", "працює"], ["maintenance", "планове ТО"], ["planned", "заплановано"], ["repair", "ремонт"], ["line_down", "лінія не працює"]];
+  const items = [["maintenance", "планове ТО"], ["planned", "заплановано"], ["repair", "ремонт"], ["line_down", "лінія не працює"]];
   return `<div class="warn-legend">${items.map(([k, t]) => `<span>${warnIcon(k, 14)} ${t}</span>`).join("")}</div>`;
 }
 let EQ = { workshops: [], workshop: "", lines: [], lineId: null, deleteMode: false };
@@ -1181,9 +1184,9 @@ function renderEquipment(typed = "") {
 
   const wsChips = EQ.workshops.map((w, i) => {
     const h = worstHealth(EQ.lines.filter(l => l.workshop === w));
-    return `<button class="btn ${w === EQ.workshop ? "" : "secondary"}" onclick="eqPickWorkshop(${i})">${warnIcon(h)} ${esc(w)}</button>`;
+    return `<button class="btn ${w === EQ.workshop ? "" : "secondary"}" onclick="eqPickWorkshop(${i})">${chipIcon(h)}${esc(w)}</button>`;
   }).join("");
-  const lineChips = inWs.map(l => `<button class="btn ${l.id === EQ.lineId ? "" : "secondary"}" onclick="eqPickLine(${Number(l.id)})">${warnIcon(healthKind(l))} ${esc(l.name)}</button>`).join("");
+  const lineChips = inWs.map(l => `<button class="btn ${l.id === EQ.lineId ? "" : "secondary"}" onclick="eqPickLine(${Number(l.id)})">${chipIcon(healthKind(l))}${esc(l.name)}</button>`).join("");
 
   const addLineForm = edit
     ? `<div class="form"><h2>Лінії цеху «${esc(EQ.workshop)}»</h2>${formField("Назва нової лінії", "linename", "text", "")}<div class="row"><button class="btn" onclick="eqAddLine()">＋ Додати лінію</button>${line ? `<button class="btn danger" onclick="eqDeleteLine()">－ Видалити «${esc(line.name)}»</button>` : ""}</div></div>`
