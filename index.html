@@ -102,6 +102,11 @@
   .qrgrid { display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:14px; }
   .qrcard { background:#fff; border:1px solid var(--border); border-radius:12px; padding:8px; text-align:center; font-size:13px; font-weight:600; }
   .qrcard img { width:100%; max-width:150px; display:block; margin:0 auto 4px; }
+  .chk { display:flex; gap:14px; align-items:flex-start; margin:16px 0; cursor:pointer; }
+  .chk.off { opacity:.5; cursor:default; }
+  .chk input[type="checkbox"] { width:26px; height:26px; min-height:0; padding:0; margin:2px 0 0; flex:none; accent-color:#1f7a3d; }
+  .chk b { font-size:15px; }
+  .chk small { color:var(--hint); font-size:13px; line-height:1.35; }
   .card.unitmode { outline: 2px solid #2f6fed; }
   .card.deleting { outline: 2px solid #e0433a; color: #e0433a; }
   .btn:active { opacity: .85; }
@@ -438,11 +443,46 @@ function renderProfile(gate) {
        <p class="hint">⚠️ Пароль тут не вказуй: зберігається лише імʼя та логін.</p>
        <button class="btn" style="width:100%" onclick="saveProfile(${gate ? "true" : "false"})">${gate ? "Зберегти й увійти" : "Зберегти"}</button>
        ${!gate && done ? `<button class="btn danger" style="width:100%;margin-top:10px" onclick="profileLogout()">Вийти з профілю</button>` : ""}
-     </div>`
+     </div>` + (gate ? "" : notifyBlockHtml())
   );
 }
 
+function notifyBlockHtml() {
+  const list = (ME && ME.notify) || [];
+  if (!list.length) return "";
+  return `<h2>🔔 Сповіщення</h2><p class="hint">Оберіть, які сповіщення надсилати вам у Telegram.</p><div class="form">` +
+    list.map(n => `<label class="chk ${n.available ? "" : "off"}"><input type="checkbox" id="nf_${esc(n.key)}" ${n.enabled ? "checked" : ""} ${n.available ? "" : "disabled"}><span><b>${esc(n.label)}</b><br><small>${n.available ? esc(n.desc) : "Доступно зав складу та адміну."}</small></span></label>`).join("") +
+    `<button class="btn" style="width:100%;margin-top:6px" onclick="saveNotify()">Зберегти</button>
+     <button class="btn secondary" style="width:100%;margin-top:8px" onclick="testNotify()">🔔 Надіслати тестове сповіщення</button>
+     <p class="hint">Щоб сповіщення приходили, один раз відкрий чат із ботом і натисни Start.</p></div>`;
+}
+
+async function saveNotify() {
+  const body = {};
+  ((ME && ME.notify) || []).forEach(n => {
+    const el = document.getElementById("nf_" + n.key);
+    if (el && !el.disabled) body[n.key] = el.checked;
+  });
+  try {
+    const r = await api("/api/profile/notifications", { method: "POST", body });
+    ME.notify = r.notify;
+    toast("Налаштування сповіщень збережено");
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
+async function testNotify() {
+  try {
+    await api("/api/profile/notifications/test", { method: "POST", body: {} });
+    toast("Тестове сповіщення надіслано. Перевір чат із ботом.");
+  } catch (e) {
+    toast(e.message);
+  }
+}
+
 route("profile", async () => {
+  try { ME = await api("/api/me"); } catch (_e) {}
   renderProfile(false);
 });
 
@@ -707,11 +747,15 @@ function searchNow() {
 
 route("deficit", async () => {
   render(topbar("Дефіцит", "menu") + `<div class="center">Завантаження…</div>`);
-  const rows = await api("/api/deficit");
+  const [rows, log] = await Promise.all([api("/api/deficit"), api("/api/deficit/log?limit=50").catch(() => [])]);
   render(
     topbar("⚠️ Дефіцит", "menu") +
     `<p class="hint">Показані товари, залишок яких не більший за мінімальний (за замовчуванням 5).</p>` +
-    (rows.length ? rows.map(i => itemCard(i)).join("") : `<div class="empty">Товарів із критично малим залишком немає</div>`)
+    (rows.length ? rows.map(i => itemCard(i)).join("") : `<div class="empty">Товарів із критично малим залишком немає</div>`) +
+    `<h2>📒 Журнал сповіщень про дефіцит</h2>` +
+    (log.length
+      ? log.map(a => `<div class="card click" onclick="go('item', ${Number(a.item_id)})"><div class="card-main"><div class="title">#${Number(a.id)} · ${esc(a.item_name)}</div><div class="sub">${a.kind === "zero" ? "Закінчився" : "Мало"}: ${Number(a.qty)} ${uLabel(a.unit)} (мінімум ${Number(a.min)})<br>${fmtDate(a.created_at)}${a.actor ? " · " + esc(a.actor) : ""}</div></div><span>›</span></div>`).join("")
+      : `<div class="empty">Сповіщень про дефіцит поки не було</div>`)
   );
 });
 
@@ -736,6 +780,20 @@ async function showEquipQR(equipId, nameEnc) {
   }
 }
 
+async function sendQrPdf(scope, lineId, wsEnc) {
+  const status = document.getElementById("qrpdfstatus");
+  if (status) status.textContent = "⏳ Формую PDF, зачекай…";
+  const body = { scope };
+  if (lineId) body.line_id = lineId;
+  if (wsEnc) body.workshop = decodeURIComponent(wsEnc);
+  try {
+    const r = await api("/api/equipment/qr-pdf", { method: "POST", body });
+    if (status) status.textContent = `✅ PDF надіслано в чат із ботом: ${Number(r.count)} QR-кодів, сторінок: ${Number(r.pages)}. Відкрий чат із ботом і друкуй.`;
+  } catch (e) {
+    if (status) status.textContent = "❌ " + e.message;
+  }
+}
+
 route("eqqr", async (lineId) => {
   render(topbar("📱 QR-коди", "equipment") + `<div class="center">Завантаження…</div>`);
   let lines = EQ.lines;
@@ -744,8 +802,13 @@ route("eqqr", async (lineId) => {
   if (!line) throw new Error("Лінію не знайдено");
   render(
     topbar(`📱 ${line.name}`, "equipment") +
-    `<p class="hint">${esc(line.workshop)} · ${esc(line.name)}. Зроби скріншот або збережи зображення, щоб роздрукувати й наклеїти на обладнання.</p>
-     <div class="qrgrid">${line.equipment.map(e => `<div class="qrcard"><img id="qr_${Number(e.id)}" alt=""><div>${esc(e.name)}</div></div>`).join("")}</div>`
+    `<p class="hint">${esc(line.workshop)} · ${esc(line.name)}.</p>` +
+    (canEquip() ? `<h2>🖨 Друк пачкою</h2>
+     <p class="hint">PDF з усіма QR-кодами надійде в чат із ботом (сітка 3×4 на аркуші A4). Відкрий його й друкуй у масштабі 100%.</p>
+     <div class="row" style="margin-bottom:8px"><button class="btn" style="flex:1" onclick="sendQrPdf('line', ${Number(line.id)})">📄 Ця лінія</button></div>
+     <div class="row"><button class="btn secondary" style="flex:1" onclick="sendQrPdf('workshop', null, '${enc(line.workshop)}')">📄 Увесь цех</button><button class="btn secondary" style="flex:1" onclick="sendQrPdf('all')">📄 Усе обладнання</button></div>
+     <div id="qrpdfstatus" class="hint"></div>` : "") +
+    `<div class="qrgrid">${line.equipment.map(e => `<div class="qrcard"><img id="qr_${Number(e.id)}" alt=""><div>${esc(e.name)}</div></div>`).join("")}</div>`
   );
   line.equipment.forEach(async e => {
     try {
@@ -886,7 +949,7 @@ route("admin", async () => {
           ${(mine || locked) ? "" : `
           <div class="row" style="margin-top:8px">
             <select style="width:auto;margin:0" onchange="setUserRole(${u.user_id}, this.value)">
-              ${roleKeys.map(r => `<option value="${r}" ${u.role === r ? "selected" : ""}>${esc(ROLE_LABELS[r])}</option>`).join("")}
+              ${roleKeys.map(r => `<option value="${r}" ${(roleKeys.includes(u.role) ? u.role : "worker") === r ? "selected" : ""}>${esc(ROLE_LABELS[r])}</option>`).join("")}
             </select>
             <button class="btn danger" style="padding:6px 10px;font-size:12px" onclick="removeUser(${u.user_id}, '${enc(u.username || u.user_id)}')">🗑 Видалити</button>
           </div>`}
@@ -1551,6 +1614,11 @@ async function boot() {
         topbar("Очікування підтвердження", null) +
         `<div class="center">Ваш запит на доступ до складу надіслано адміністратору.<br><br>Після підтвердження закрийте та знову відкрийте застосунок.</div>`
       );
+      return;
+    }
+    const page = new URLSearchParams(location.search).get("page");
+    if (page === "deficit" || page === "equipment" || (page === "admin" && canUsers())) {
+      await go(page);
       return;
     }
     await go("menu");
