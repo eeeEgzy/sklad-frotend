@@ -253,6 +253,20 @@ function canEquip() {
   return ["admin", "manager", "editor"].includes(ME?.role);
 }
 
+// керівник: може міняти статуси обладнання/ліній, але не структуру
+function canEquipStatus() {
+  return ["admin", "manager", "editor", "director"].includes(ME?.role);
+}
+
+function canReports() {
+  return ["admin", "manager", "editor", "assistant", "director"].includes(ME?.role);
+}
+
+// керівник лише переглядає склад: без списання й поповнення
+function canWriteOff() {
+  return Boolean(ME) && ME.role !== "director";
+}
+
 function canUndo() {
   return canEdit();
 }
@@ -347,8 +361,8 @@ async function api(path, { method = "GET", body } = {}) {
   return ct.includes("application/json") ? res.json() : res;
 }
 
-const ROLE_LABELS = { admin: "Адмін", manager: "Зав складу", editor: "Редактор", assistant: "Помічник складу", worker: "Працівник" };
-const ROLE_COLORS = { admin: "#2481cc", manager: "#8e44ad", editor: "#388a34", assistant: "#16a0a0", worker: "#e09f3a" };
+const ROLE_LABELS = { admin: "Адмін", manager: "Зав складу", director: "Керівник", editor: "Механік", assistant: "Помічник складу", worker: "Працівник" };
+const ROLE_COLORS = { admin: "#2481cc", manager: "#8e44ad", director: "#c0392b", editor: "#388a34", assistant: "#16a0a0", worker: "#e09f3a" };
 
 // одиниця виміру: «шт» показуємо з крапкою, м/см/мм — як є
 function uLabel(u) {
@@ -522,7 +536,7 @@ route("menu", async () => {
     <button class="menu-btn" onclick="go('search')">🔍 Пошук товару</button>
     <button class="menu-btn" onclick="go('deficit')">⚠️ Дефіцит і малі залишки</button>
     <button class="menu-btn" onclick="go('scan')">📷 Сканувати QR обладнання</button>
-    ${canEdit() ? `<button class="menu-btn" onclick="go('reports')">📊 Звіти (Google Таблиці)</button>` : ""}
+    ${canReports() ? `<button class="menu-btn" onclick="go('reports')">📊 Звіти (Google Таблиці)</button>` : ""}
     <button class="menu-btn" onclick="go('equipment')">🏭 Обладнання та лінії</button>
     ${canUsers() ? `<button class="menu-btn" onclick="go('audit')">📋 Ревізія</button>` : ""}
     <button class="menu-btn" onclick="go('adminlogs')">📜 Історія операцій</button>
@@ -680,7 +694,7 @@ route("item", async (id) => {
       </div>
       <span class="qty ${item.quantity <= (item.min ?? 4) ? "low" : ""}">${item.quantity} ${uLabel(item.unit)}</span>
     </div>
-    ${itemControls(item, reasons)}
+    ${canWriteOff() ? itemControls(item, reasons) : ""}
     ${canUsers() ? `<div class="form"><label for="minqty">Мінімальний залишок (при ньому приходить сповіщення в Telegram)</label><div class="row" style="flex-wrap:nowrap"><input type="number" id="minqty" value="${item.min_qty ?? ""}" placeholder="за замовч. ${Number(item.min)}" min="0" inputmode="numeric" style="flex:1"><button class="btn" onclick="saveMinQty(${item.id})">Зберегти</button></div></div>` : ""}
     <h2>Історія операцій</h2>` +
     (history.length
@@ -898,7 +912,7 @@ function openScannedCode() {
 }
 
 route("reports", async () => {
-  if (!canEdit()) throw new Error("Недостатньо прав");
+  if (!canReports()) throw new Error("Недостатньо прав");
   render(
     topbar("📊 Звіти", "menu") +
     `<p class="hint">Звіт створюється в Google Таблиці: підсумок по товарах і всі операції за період.</p>
@@ -1176,7 +1190,7 @@ function renderAuditResult(r) {
   );
 }
 
-// ================= ОБЛАДНАННЯ ТА ЛІНІЇ (бачать усі, змінюють — від редактора) =================
+// ================= ОБЛАДНАННЯ ТА ЛІНІЇ (бачать усі; статуси міняють керівник і механік+; структуру — механік+) =================
 const EQ_STATUS = {
   work: ["Працює", "st-work", "🟢"],
   maintenance: ["Планове ТО", "st-maintenance", "🟡"],
@@ -1256,7 +1270,8 @@ route("equipment", async (lineId) => {
 });
 
 function renderEquipment(typed = "") {
-  const edit = canEquip();
+  const edit = canEquip();          // додавати/видаляти лінії та обладнання
+  const stat = canEquipStatus();    // змінювати статуси
   const inWs = EQ.lines.filter(l => l.workshop === EQ.workshop);
   const line = curLine();
 
@@ -1275,15 +1290,15 @@ function renderEquipment(typed = "") {
     body = `<div class="empty">У цьому цеху ще немає ліній</div>` + addLineForm;
   } else {
     const lineInfo = `<div class="card"><div class="card-main"><div class="title">${esc(line.workshop)} · ${esc(line.name)}</div><div class="sub">${line.status !== "work" ? eqRange(line.from, line.until) + (line.note ? " · " + esc(line.note) : "") : `Ремонт: ${Number(line.counts.repair)} · ТО: ${Number(line.counts.maintenance)}`}${line.next ? `<br>Далі: ${esc(EQ_STATUS[line.next.status][0])} з ${fmtDate(line.next.from)}` : ""}</div></div>${stBadge(line.status)}</div>` +
-      (edit ? `<div class="row" style="margin-bottom:10px"><button class="btn" style="width:100%" onclick="eqMark(null)">⚙️ Позначити всю лінію</button></div>` : "") +
+      (stat ? `<div class="row" style="margin-bottom:10px"><button class="btn" style="width:100%" onclick="eqMark(null)">⚙️ Позначити всю лінію</button></div>` : "") +
       `<div class="row" style="margin-bottom:10px"><button class="btn secondary" style="width:100%" onclick="go('eqqr', ${Number(line.id)})">📱 QR-коди обладнання лінії</button></div>`;
     const items = line.equipment.map(e => {
       const detail = (e.status !== "work" ? eqRange(e.from, e.until) + (e.source === "line" ? " (через лінію)" : "") + (e.note ? " · " + esc(e.note) : "") : "") +
         (e.next ? `${e.status !== "work" ? "<br>" : ""}Далі: ${esc(EQ_STATUS[e.next.status][0])} з ${fmtDate(e.next.from)}` : "");
-      return `<div class="card ${edit ? "click" : ""} ${EQ.deleteMode ? "deleting" : ""}" ${edit ? `onclick="eqClick(${Number(e.id)})"` : ""}><div class="card-main"><div class="title">${esc(e.name)}</div>${detail ? `<div class="sub">${detail}</div>` : ""}${EQ.deleteMode ? "" : `<div style="margin-top:6px"><button class="btn secondary" style="padding:6px 10px;font-size:14px" onclick="event.stopPropagation(); go('parts', ${Number(e.id)})">🔧 Деталі (${Number(e.parts || 0)})</button></div>`}</div>${EQ.deleteMode ? "<span>✕</span>" : stBadge(e.status)}</div>`;
+      return `<div class="card ${stat ? "click" : ""} ${EQ.deleteMode ? "deleting" : ""}" ${stat ? `onclick="eqClick(${Number(e.id)})"` : ""}><div class="card-main"><div class="title">${esc(e.name)}</div>${detail ? `<div class="sub">${detail}</div>` : ""}${EQ.deleteMode ? "" : `<div style="margin-top:6px"><button class="btn secondary" style="padding:6px 10px;font-size:14px" onclick="event.stopPropagation(); go('parts', ${Number(e.id)})">🔧 Деталі (${Number(e.parts || 0)})</button></div>`}</div>${EQ.deleteMode ? "<span>✕</span>" : stBadge(e.status)}</div>`;
     }).join("");
     body = lineInfo +
-      (edit ? (EQ.deleteMode ? `<p class="hint" style="color:#e0433a">Режим видалення: натисни на обладнання, яке треба прибрати зі списку.</p>` : `<p class="hint">Натисни на обладнання, щоб позначити ТО, ремонт чи повернення в роботу.</p>`) : "") +
+      (stat ? (EQ.deleteMode ? `<p class="hint" style="color:#e0433a">Режим видалення: натисни на обладнання, яке треба прибрати зі списку.</p>` : `<p class="hint">Натисни на обладнання, щоб позначити ТО, ремонт чи повернення в роботу.</p>`) : "") +
       (items || `<div class="empty">На цій лінії обладнання ще немає</div>`) +
       (edit ? `<div class="form"><h2>Додати обладнання</h2>${formField("Назва обладнання", "eqname", "text", typed)}<div class="row"><button class="btn" onclick="eqAdd()">＋ Додати обладнання</button><button class="btn danger" onclick="eqToggleDelete()">${EQ.deleteMode ? "Готово" : "－ Видалити обладнання"}</button></div></div>` : "") +
       addLineForm +
@@ -1326,8 +1341,8 @@ function eqToggleDelete() {
 }
 
 function eqClick(equipId) {
-  if (!canEquip()) return;
-  if (EQ.deleteMode) return eqDelete(equipId);
+  if (!canEquipStatus()) return;
+  if (EQ.deleteMode) return canEquip() ? eqDelete(equipId) : null;
   eqMark(equipId);
 }
 
@@ -1355,7 +1370,7 @@ async function eqStatusDialog(lineId, equipId, title, after) {
 
 async function eqMark(equipId) {
   const line = curLine();
-  if (!line || !canEquip()) return;
+  if (!line || !canEquipStatus()) return;
   const eq = equipId ? line.equipment.find(e => e.id === equipId) : null;
   return eqStatusDialog(line.id, equipId, eq ? eq.name : `${line.name} — уся лінія`, () => go("equipment", line.id));
 }
@@ -1418,10 +1433,11 @@ async function loadEquipEvents() {
   const box = document.getElementById("eqevents");
   if (!box || !EQ.lineId) return;
   const edit = canEquip();
+  const stat = canEquipStatus();
   try {
     const rows = await api("/api/equipment/events?line_id=" + EQ.lineId);
     const stateLabel = { planned: "🕒 заплановано", active: "▶️ триває", finished: "✔️ завершено" };
-    box.innerHTML = rows.length ? rows.map(r => `<div class="history ${r.state === "finished" ? "reverted" : ""}"><b>${esc(EQ_STATUS[r.status][0])}</b> · ${esc(r.target)} · ${stateLabel[r.state]}<br>${eqRange(r.from, r.until)}${r.note ? "<br>📝 " + esc(r.note) : ""}<br>👤 ${esc(r.username)}${edit ? `<br>${r.state === "active" ? `<button class="btn secondary" style="margin-top:6px" onclick="eqEndEvent(${Number(r.id)})">⏹ Завершити зараз</button> ` : ""}<button class="btn secondary" style="margin-top:6px" onclick="eqDeleteEvent(${Number(r.id)})">🗑 Видалити запис</button>` : ""}</div>`).join("") : `<div class="empty">Записів поки немає</div>`;
+    box.innerHTML = rows.length ? rows.map(r => `<div class="history ${r.state === "finished" ? "reverted" : ""}"><b>${esc(EQ_STATUS[r.status][0])}</b> · ${esc(r.target)} · ${stateLabel[r.state]}<br>${eqRange(r.from, r.until)}${r.note ? "<br>📝 " + esc(r.note) : ""}<br>👤 ${esc(r.username)}${stat ? `<br>${r.state === "active" ? `<button class="btn secondary" style="margin-top:6px" onclick="eqEndEvent(${Number(r.id)})">⏹ Завершити зараз</button> ` : ""}${edit ? `<button class="btn secondary" style="margin-top:6px" onclick="eqDeleteEvent(${Number(r.id)})">🗑 Видалити запис</button>` : ""}` : ""}</div>`).join("") : `<div class="empty">Записів поки немає</div>`;
   } catch (e) {
     box.innerHTML = `<div class="empty">Не вдалося завантажити: ${esc(e.message)}</div>`;
   }
@@ -1480,7 +1496,7 @@ function renderParts(typedName = "", typedDetails = "") {
   const st = d.status || { status: "work" };
   const statusBlock =
     `<div class="card"><div class="card-main"><div class="title">Поточний статус</div><div class="sub">${st.status !== "work" ? eqRange(st.from, st.until) + (st.source === "line" ? " (через лінію)" : "") + (st.note ? " · " + esc(st.note) : "") : "Без обмежень"}</div></div>${stBadge(st.status)}</div>` +
-    `<div class="row" style="margin-bottom:10px">${canEquip() ? `<button class="btn" style="flex:1" onclick="partsChangeStatus()">⚙️ Змінити статус</button>` : ""}<button class="btn secondary" style="flex:1" onclick="showEquipQR(${Number(d.equipment.id)}, '${enc(d.equipment.name)}')">📱 QR-код</button></div>`;
+    `<div class="row" style="margin-bottom:10px">${canEquipStatus() ? `<button class="btn" style="flex:1" onclick="partsChangeStatus()">⚙️ Змінити статус</button>` : ""}<button class="btn secondary" style="flex:1" onclick="showEquipQR(${Number(d.equipment.id)}, '${enc(d.equipment.name)}')">📱 QR-код</button></div>`;
   const usageBlock = `<h2>🛠 Списано на це обладнання (30 днів)</h2>` +
     ((d.usage || []).length
       ? d.usage.map(u => `<div class="card click" onclick="go('item', ${Number(u.item_id)})"><div class="card-main"><div class="title">${esc(u.name)}</div></div><span class="qty">${Number(u.qty)} ${uLabel(u.unit)}</span></div>`).join("")
