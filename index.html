@@ -102,6 +102,16 @@
   .qrgrid { display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:14px; }
   .qrcard { background:#fff; border:1px solid var(--border); border-radius:12px; padding:8px; text-align:center; font-size:13px; font-weight:600; }
   .qrcard img { width:100%; max-width:150px; display:block; margin:0 auto 4px; }
+  /* індикатор завантаження: крутиться кільце, текст і крапки блимають */
+  .loading { display:flex; flex-direction:column; align-items:center; gap:14px; padding:48px 0; color:var(--hint); }
+  .spinner { width:38px; height:38px; border:4px solid var(--border); border-top-color:#111; border-radius:50%; animation: spin .8s linear infinite; }
+  .loading-text { font-size:16px; animation: blink 1.2s ease-in-out infinite; }
+  .loading-text .dot { animation: blink 1.2s ease-in-out infinite; }
+  .loading-text .dot:nth-child(2) { animation-delay: .2s; }
+  .loading-text .dot:nth-child(3) { animation-delay: .4s; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes blink { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
   .chk { display:flex; gap:14px; align-items:flex-start; margin:16px 0; cursor:pointer; }
   .chk.off { opacity:.5; cursor:default; }
   .chk input[type="checkbox"] { width:26px; height:26px; min-height:0; padding:0; margin:2px 0 0; flex:none; accent-color:#1f7a3d; }
@@ -175,7 +185,7 @@
 </style>
 </head>
 <body>
-<div id="app"><div class="center">Завантаження…</div></div>
+<div id="app"><div class="loading"><div class="spinner"></div><div class="loading-text">Завантаження<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></div></div></div>
 
 <script>
 const tg = window.Telegram ? window.Telegram.WebApp : null;
@@ -560,7 +570,7 @@ const UNIT_OPTIONS = [
 route("categories", async () => {
   deleteMode = false;
   unitMode = false;
-  render(topbar("Категорії", "menu") + `<div class="center">Завантаження…</div>`);
+  render(topbar("Категорії", "menu") + `<div class="loading"><div class="spinner"></div><div class="loading-text">Завантаження<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></div></div>`);
   CATS = await api("/api/categories");
   try { UNITS = await api("/api/categories/units"); } catch (_e) { UNITS = {}; }
   renderCategories();
@@ -679,7 +689,7 @@ async function createItem(category) {
 }
 
 route("item", async (id) => {
-  render(topbar("Товар", "previous") + `<div class="center">Завантаження…</div>`);
+  render(topbar("Товар", "previous") + `<div class="loading"><div class="spinner"></div><div class="loading-text">Завантаження<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></div></div>`);
   const item = await api("/api/items/" + id);
   const history = item.history || [];
   let reasons = [];
@@ -760,7 +770,7 @@ function searchNow() {
 }
 
 route("deficit", async () => {
-  render(topbar("Дефіцит", "menu") + `<div class="center">Завантаження…</div>`);
+  render(topbar("Дефіцит", "menu") + `<div class="loading"><div class="spinner"></div><div class="loading-text">Завантаження<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></div></div>`);
   const [rows, log] = await Promise.all([api("/api/deficit"), api("/api/deficit/log?limit=50").catch(() => [])]);
   render(
     topbar("⚠️ Дефіцит", "menu") +
@@ -809,7 +819,7 @@ async function sendQrPdf(scope, lineId, wsEnc) {
 }
 
 route("eqqr", async (lineId) => {
-  render(topbar("📱 QR-коди", "equipment") + `<div class="center">Завантаження…</div>`);
+  render(topbar("📱 QR-коди", "equipment") + `<div class="loading"><div class="spinner"></div><div class="loading-text">Завантаження<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></div></div>`);
   let lines = EQ.lines;
   if (!lines.length) lines = (await api("/api/equipment")).lines;
   const line = lines.find(l => l.id === Number(lineId));
@@ -926,7 +936,7 @@ route("reports", async () => {
 });
 
 route("admin", async () => {
-  render(topbar("Адмінка", "menu") + `<div class="center">Завантаження…</div>`);
+  render(topbar("Адмінка", "menu") + `<div class="loading"><div class="spinner"></div><div class="loading-text">Завантаження<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></div></div>`);
   const [pending, users] = await Promise.all([api("/api/admin/pending"), api("/api/admin/users")]);
   const roleKeys = Object.keys(ROLE_LABELS).filter(r => r !== "admin" || ME.role === "admin");
   render(
@@ -1068,7 +1078,7 @@ async function loadLogs() {
   const params = new URLSearchParams({ limit: "300" });
   Object.entries(logFilters).forEach(([k, v]) => { if (v) params.set(k, v); });
   const box = document.getElementById("logsbox");
-  if (box) box.innerHTML = `<div class="center">Завантаження…</div>`;
+  if (box) box.innerHTML = `<div class="loading"><div class="spinner"></div><div class="loading-text">Завантаження<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></div></div>`;
   try {
     const rows = await api("/api/logs?" + params.toString());
     if (box) box.innerHTML = rows && rows.length ? rows.map(logRowHtml).join("") : `<div class="empty">Нічого не знайдено</div>`;
@@ -1104,7 +1114,7 @@ async function undoLog(id) {
 }
 
 route("adminlogs", async () => {
-  render(topbar("📜 Історія операцій", "menu") + `<div class="center">Завантаження…</div>`);
+  render(topbar("📜 Історія операцій", "menu") + `<div class="loading"><div class="spinner"></div><div class="loading-text">Завантаження<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></div></div>`);
   try { logUsers = await api("/api/logs/users"); } catch (_e) { logUsers = []; }
   render(topbar("📜 Історія операцій", "menu") + logFiltersHtml() + `<div id="logsbox"></div>`);
   loadLogs();
@@ -1129,7 +1139,7 @@ let auditScope = "";
 
 route("audit", async () => {
   if (!canUsers()) throw new Error("Недостатньо прав");
-  render(topbar("📋 Ревізія", "menu") + `<div class="center">Завантаження…</div>`);
+  render(topbar("📋 Ревізія", "menu") + `<div class="loading"><div class="spinner"></div><div class="loading-text">Завантаження<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></div></div>`);
   AUDIT_CATS = await api("/api/categories");
   render(
     topbar("📋 Ревізія", "menu") +
@@ -1147,7 +1157,7 @@ async function auditStart(i) {
 route("auditcount", async (category) => {
   if (!canUsers()) throw new Error("Недостатньо прав");
   auditScope = String(category);
-  render(topbar(auditScope, "audit") + `<div class="center">Завантаження…</div>`);
+  render(topbar(auditScope, "audit") + `<div class="loading"><div class="spinner"></div><div class="loading-text">Завантаження<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></div></div>`);
   const items = await api("/api/items?category=" + enc(auditScope));
   render(
     topbar("📋 " + auditScope, "audit") +
@@ -1253,7 +1263,7 @@ function worstHealth(lines) {
 }
 
 route("equipment", async (lineId) => {
-  render(topbar("🏭 Обладнання", "menu") + `<div class="center">Завантаження…</div>`);
+  render(topbar("🏭 Обладнання", "menu") + `<div class="loading"><div class="spinner"></div><div class="loading-text">Завантаження<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></div></div>`);
   const data = await api("/api/equipment");
   EQ.lines = data.lines;
   EQ.workshops = data.workshops;
@@ -1302,7 +1312,7 @@ function renderEquipment(typed = "") {
       (items || `<div class="empty">На цій лінії обладнання ще немає</div>`) +
       (edit ? `<div class="form"><h2>Додати обладнання</h2>${formField("Назва обладнання", "eqname", "text", typed)}<div class="row"><button class="btn" onclick="eqAdd()">＋ Додати обладнання</button><button class="btn danger" onclick="eqToggleDelete()">${EQ.deleteMode ? "Готово" : "－ Видалити обладнання"}</button></div></div>` : "") +
       addLineForm +
-      `<h2>Заплановані та історія</h2><div id="eqevents"><div class="center">Завантаження…</div></div>`;
+      `<h2>Заплановані та історія</h2><div id="eqevents"><div class="loading"><div class="spinner"></div><div class="loading-text">Завантаження<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></div></div></div>`;
   }
 
   render(
@@ -1485,7 +1495,7 @@ let PARTS = { eqId: null, data: null, deleteMode: false };
 route("parts", async (eqId) => {
   PARTS.eqId = Number(eqId);
   PARTS.deleteMode = false;
-  render(topbar("🔧 Деталі", "equipment") + `<div class="center">Завантаження…</div>`);
+  render(topbar("🔧 Деталі", "equipment") + `<div class="loading"><div class="spinner"></div><div class="loading-text">Завантаження<span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></div></div>`);
   PARTS.data = await api(`/api/equipment/${PARTS.eqId}/parts`);
   renderParts();
 });
